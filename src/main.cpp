@@ -9,6 +9,7 @@
 #include "spotify.h"
 #include "settings.h"
 #include "web.h"
+#include "driver/gpio.h"
 
 // ---------- Panel wiring (verified) ----------
 HUB75_I2S_CFG::i2s_pins pins = {
@@ -53,6 +54,8 @@ volatile int otaProgress = 0;     // 0-100
 uint8_t *outFrame = nullptr;   // RGB888 frame rendered from the art
 uint8_t *blendFrame = nullptr; // RGB888 crossfade result
 uint8_t *fadeFrom = nullptr;   // RGB888 snapshot of the old picture
+
+const bool DISPLAY_ENABLED = true;  // TEMPORARY test: panel not driven
 
 // =====================================================================
 //  Art hand-over between the two cores
@@ -104,6 +107,7 @@ void showMessage(const char *msg) {
 
 bool connectWiFi() {
   WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);  // keep the radio awake: faster, more reliable replies
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   Serial.print("Connecting to Wi-Fi");
   for (int i = 0; i < 40 && WiFi.status() != WL_CONNECTED; i++) {
@@ -114,6 +118,7 @@ bool connectWiFi() {
   if (WiFi.status() == WL_CONNECTED) {
     Serial.print("Connected, IP: ");
     Serial.println(WiFi.localIP());
+    Serial.printf("Signal strength: %d dBm\n", WiFi.RSSI());
     return true;
   }
   Serial.println("Wi-Fi FAILED");
@@ -128,6 +133,7 @@ uint8_t *downloadFile(const char *url, size_t &outLen) {
   static bool initialised = false;
   if (!initialised) {
     client.setInsecure();  // TODO: verify certificates (hardening step)
+    client.setHandshakeTimeout(10);
     http.setReuse(true);
     http.setTimeout(5000);
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
@@ -438,17 +444,24 @@ void setup() {
   delay(1000);
   settingsLoad();
 
-  HUB75_I2S_CFG cfg(W, H, 1, pins);
-  cfg.driver = HUB75_I2S_CFG::FM6126A;  // panel uses FM6124 chips
-  cfg.clkphase = false;                 // fixes the one-pixel shift
-  cfg.double_buff = true;               // draw off-screen, then swap: no tearing
-  display = new MatrixPanel_I2S_DMA(cfg);
-  if (!display->begin()) {
-    Serial.println("Display init FAILED");
-    while (true) delay(1000);
+  if(DISPLAY_ENABLED) {
+    HUB75_I2S_CFG cfg(W, H, 1, pins);
+    cfg.driver = HUB75_I2S_CFG::FM6126A;  // panel uses FM6124 chips
+    cfg.clkphase = false;                 // fixes the one-pixel shift
+    cfg.double_buff = true;               // draw off-screen, then swap: no tearing
+    display = new MatrixPanel_I2S_DMA(cfg);
+    if (!display->begin()) {
+      Serial.println("Display init FAILED");
+      while (true) delay(1000);
+    }
+    // Softer signal edges on the panel wires = less Wi-Fi interference
+    const int hub75Pins[] = {1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 38};
+    for (int p : hub75Pins) {
+      gpio_set_drive_capability((gpio_num_t)p, GPIO_DRIVE_CAP_0);
+    }
+    display->setBrightness8(settings.brightness);
+    display->clearScreen();
   }
-  display->setBrightness8(settings.brightness);
-  display->clearScreen();
 
   artA.px    = (uint8_t *)ps_calloc(ART * ART * 3, 1);
   artB.px    = (uint8_t *)ps_calloc(ART * ART * 3, 1);
@@ -475,6 +488,13 @@ void loop() {
   static const uint8_t *lastShown = nullptr;
   static uint8_t appliedBrightness = 0;
   static float zoomForDeg = -1.0f, orbitZoom = 1.0f;
+  if (!DISPLAY_ENABLED) {  // test mode: just accept images so nothing waits
+    xSemaphoreTake(artMutex, portMAX_DELAY);
+    pendingReady = false;
+    xSemaphoreGive(artMutex);
+    delay(50);
+    return;
+  }
 
   handleSerial();
   unsigned long now = millis();

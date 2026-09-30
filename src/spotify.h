@@ -16,3 +16,12 @@ enum class SpotifyResult { Ok, NothingPlaying, AuthError, RateLimited, NetworkEr
 
 void spotifyBegin();
 SpotifyResult spotifyGetNowPlaying(NowPlaying &np);
+struct SpotifyStats {
+  uint32_t polls = 0;     // requests made since start-up
+  uint32_t failures = 0;  // requests that got no answer
+  int lastCode = 0;       // last HTTP result (200 = OK)
+  uint32_t lastMs = 0;    // how long the last request took
+  uint32_t totalMs = 0;   // for the average
+  uint32_t worstMs = 0;   // slowest request
+};
+extern SpotifyStats spotifyStats;

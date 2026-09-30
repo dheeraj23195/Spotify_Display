@@ -6,6 +6,7 @@
 #include <ESPmDNS.h>
 #include "settings.h"
 #include "secrets.h"
+#include "spotify.h"
 
 extern volatile bool otaActive;   // defined in main.cpp
 extern volatile int otaProgress;
@@ -65,6 +66,23 @@ static String page() {
 
   h += F("<h2>Song change</h2>");
   h += slider("fadeMs", "Crossfade (ms)", settings.fadeMs, 0, 3000, 100);
+
+  {
+    char buf[400];
+    uint32_t up = millis() / 1000;
+    uint32_t avg = spotifyStats.polls ? spotifyStats.totalMs / spotifyStats.polls : 0;
+    snprintf(buf, sizeof(buf),
+              "<h2>Status</h2><p style='line-height:1.6'>"
+              "Wi-Fi signal: %d dBm<br>"
+              "Spotify checks: %u (failed: %u)<br>"
+              "Last: %u ms (HTTP %d)<br>"
+              "Average: %u ms, slowest: %u ms<br>"
+              "Running for: %uh %um</p>",
+              WiFi.RSSI(), spotifyStats.polls, spotifyStats.failures,
+              spotifyStats.lastMs, spotifyStats.lastCode,
+              avg, spotifyStats.worstMs, up / 3600, (up / 60) % 60);
+    h += buf;
+  }
 
   h += F("</form><div id='st'></div>"
          "<h2>Maintenance</h2>"

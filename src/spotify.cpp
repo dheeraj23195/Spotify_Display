@@ -1,5 +1,6 @@
 #include "spotify.h"
 #include <WiFiClientSecure.h>
+#include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
@@ -11,6 +12,7 @@ static unsigned long tokenObtainedAt = 0;
 static unsigned long tokenLifetimeMs = 0;
 static String refreshToken;
 static Preferences prefs;
+SpotifyStats spotifyStats;
 
 // One long-lived connection to api.spotify.com, reused between polls.
 // Skipping a fresh secure handshake on every poll saves a lot of time.
@@ -39,6 +41,7 @@ void spotifyBegin() {
   }
 
   apiClient.setInsecure();  // TODO: verify certificates (hardening step)
+  apiClient.setHandshakeTimeout(10);  // give up on a stalled connection after 10 s
   apiHttp.setReuse(true);   // keep the connection open between requests
   apiHttp.setTimeout(5000);
 }
@@ -46,6 +49,7 @@ void spotifyBegin() {
 static bool refreshAccessToken() {
   WiFiClientSecure client;
   client.setInsecure();  // TODO: verify certificates (hardening step)
+  client.setHandshakeTimeout(10);
   HTTPClient http;
   http.useHTTP10(true);
   if (!http.begin(client, "https://accounts.spotify.com/api/token")) return false;
@@ -94,7 +98,15 @@ SpotifyResult spotifyGetNowPlaying(NowPlaying &np) {
   String body;
   if (code > 0 && code != 204) body = apiHttp.getString();  // read fully so the connection can be reused
   apiHttp.end();  // with reuse on, this keeps the connection open
-  Serial.printf("Spotify poll: HTTP %d in %lu ms\n", code, millis() - t0);
+  uint32_t took = millis() - t0;
+  spotifyStats.polls++;
+  spotifyStats.lastCode = code;
+  spotifyStats.lastMs = took;
+  spotifyStats.totalMs += took;
+  if (took > spotifyStats.worstMs) spotifyStats.worstMs = took;
+  if (code < 0) spotifyStats.failures++;
+  Serial.printf("Spotify poll: HTTP %d in %lu ms (signal %d dBm)\n",
+                code, millis() - t0, WiFi.RSSI());
 
   if (code < 0) { apiClient.stop(); return SpotifyResult::NetworkError; }  // start fresh next time
   if (code == 204) { np.active = false; return SpotifyResult::NothingPlaying; }
