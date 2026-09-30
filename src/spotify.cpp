@@ -12,6 +12,11 @@ static unsigned long tokenLifetimeMs = 0;
 static String refreshToken;
 static Preferences prefs;
 
+// One long-lived connection to api.spotify.com, reused between polls.
+// Skipping a fresh secure handshake on every poll saves a lot of time.
+static WiFiClientSecure apiClient;
+static HTTPClient apiHttp;
+
 static String base64Encode(const String &in) {
   unsigned char out[256];
   size_t outLen = 0;
@@ -32,6 +37,10 @@ void spotifyBegin() {
     prefs.putString("seed", SPOTIFY_REFRESH_TOKEN);
     prefs.remove("refresh");
   }
+
+  apiClient.setInsecure();  // TODO: verify certificates (hardening step)
+  apiHttp.setReuse(true);   // keep the connection open between requests
+  apiHttp.setTimeout(5000);
 }
 
 static bool refreshAccessToken() {
@@ -75,24 +84,23 @@ SpotifyResult spotifyGetNowPlaying(NowPlaying &np) {
     if (!refreshAccessToken()) return SpotifyResult::AuthError;
   }
 
-  WiFiClientSecure client;
-  client.setInsecure();  // TODO: verify certificates (hardening step)
-  HTTPClient http;
-  http.useHTTP10(true);  // avoids chunked replies so JSON can stream
-  if (!http.begin(client, "https://api.spotify.com/v1/me/player/currently-playing")) {
+  unsigned long t0 = millis();
+  if (!apiHttp.begin(apiClient, "https://api.spotify.com/v1/me/player/currently-playing")) {
+    apiClient.stop();
     return SpotifyResult::NetworkError;
   }
-  http.addHeader("Authorization", "Bearer " + accessToken);
-  int code = http.GET();
+  apiHttp.addHeader("Authorization", "Bearer " + accessToken);
+  int code = apiHttp.GET();
+  String body;
+  if (code > 0 && code != 204) body = apiHttp.getString();  // read fully so the connection can be reused
+  apiHttp.end();  // with reuse on, this keeps the connection open
+  Serial.printf("Spotify poll: HTTP %d in %lu ms\n", code, millis() - t0);
 
-  if (code == 204) { http.end(); np.active = false; return SpotifyResult::NothingPlaying; }
-  if (code == 401) { http.end(); accessToken = ""; return SpotifyResult::AuthError; }
-  if (code == 429) { http.end(); return SpotifyResult::RateLimited; }
-  if (code != 200) {
-    Serial.printf("Spotify HTTP %d\n", code);
-    http.end();
-    return SpotifyResult::NetworkError;
-  }
+  if (code < 0) { apiClient.stop(); return SpotifyResult::NetworkError; }  // start fresh next time
+  if (code == 204) { np.active = false; return SpotifyResult::NothingPlaying; }
+  if (code == 401) { accessToken = ""; return SpotifyResult::AuthError; }
+  if (code == 429) return SpotifyResult::RateLimited;
+  if (code != 200) return SpotifyResult::NetworkError;
 
   // Keep only the fields we need (the full reply is large)
   JsonDocument filter;
@@ -106,9 +114,7 @@ SpotifyResult spotifyGetNowPlaying(NowPlaying &np) {
   filter["item"]["album"]["images"][0]["width"] = true;
 
   JsonDocument doc;
-  DeserializationError err =
-      deserializeJson(doc, http.getStream(), DeserializationOption::Filter(filter));
-  http.end();
+  DeserializationError err = deserializeJson(doc, body, DeserializationOption::Filter(filter));
   if (err) {
     Serial.printf("Spotify JSON error: %s\n", err.c_str());
     return SpotifyResult::NetworkError;
@@ -130,8 +136,7 @@ SpotifyResult spotifyGetNowPlaying(NowPlaying &np) {
     np.artist += a["name"] | "";
   }
 
-
-    // Pick Spotify's ~300x300 image (we downscale on the device for quality);
+  // Pick Spotify's ~300x300 image (we downscale on the device for quality);
   // fall back to the largest image available
   const int ART_MIN_WIDTH = 256;
   np.artUrl = "";

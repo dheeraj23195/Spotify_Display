@@ -19,7 +19,7 @@ HUB75_I2S_CFG::i2s_pins pins = {
 // ---------- Settings ----------
 const uint8_t PANEL_ROTATION = 1;    // quarter-turns (0-3)
 const uint8_t BRIGHTNESS = 80;       // 0-255
-const unsigned long POLL_MS = 4000;  // how often to ask Spotify
+const unsigned long POLL_MS = 1500;  // how often to ask Spotify
 const uint16_t FADE_MS = 800;        // crossfade between songs
 const int FPS = 30;                  // animation frame rate
 const int MAX_SRC = 320;             // largest decoded size before downscaling
@@ -128,19 +128,31 @@ bool connectWiFi() {
 }
 
 // Download a file into PSRAM. Returns buffer (caller frees) or nullptr.
+// Download a file into PSRAM. Returns buffer (caller frees) or nullptr.
+// Keeps one connection to the image server open between downloads.
 uint8_t *downloadFile(const char *url, size_t &outLen) {
-  WiFiClientSecure client;
-  client.setInsecure();  // TODO: verify certificates (hardening step)
-  HTTPClient http;
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  static WiFiClientSecure client;
+  static HTTPClient http;
+  static bool initialised = false;
+  if (!initialised) {
+    client.setInsecure();  // TODO: verify certificates (hardening step)
+    http.setReuse(true);
+    http.setTimeout(5000);
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    initialised = true;
+  }
+
+  unsigned long t0 = millis();
   if (!http.begin(client, url)) {
     Serial.println("HTTP begin failed");
+    client.stop();
     return nullptr;
   }
   int code = http.GET();
   if (code != HTTP_CODE_OK) {
     Serial.printf("HTTP error %d\n", code);
     http.end();
+    client.stop();
     return nullptr;
   }
 
@@ -151,18 +163,21 @@ uint8_t *downloadFile(const char *url, size_t &outLen) {
   if (!buf) {
     Serial.println("Out of memory");
     http.end();
+    client.stop();
     return nullptr;
   }
 
   WiFiClient *stream = http.getStreamPtr();
   size_t got = 0;
-  unsigned long start = millis();
-  while ((http.connected() || stream->available()) && got < cap &&
-         millis() - start < 10000) {
+  unsigned long start = millis(), lastData = millis();
+  while (got < cap && millis() - start < 10000) {
     size_t avail = stream->available();
     if (avail) {
       got += stream->readBytes(buf + got, min(avail, cap - got));
+      lastData = millis();
     } else {
+      if (!http.connected()) break;
+      if (len <= 0 && got > 0 && millis() - lastData > 1000) break;  // unknown size: stop when idle
       vTaskDelay(1);
     }
   }
@@ -171,8 +186,10 @@ uint8_t *downloadFile(const char *url, size_t &outLen) {
   if (got == 0 || (len > 0 && got != (size_t)len)) {
     Serial.printf("Incomplete download: %u bytes\n", got);
     free(buf);
+    client.stop();
     return nullptr;
   }
+  Serial.printf("Cover download: %u bytes in %lu ms\n", got, millis() - t0);
   outLen = got;
   return buf;
 }
