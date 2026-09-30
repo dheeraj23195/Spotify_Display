@@ -7,6 +7,8 @@
 #include <JPEGDEC.h>
 #include "secrets.h"
 #include "spotify.h"
+#include "settings.h"
+#include "web.h"
 
 // ---------- Panel wiring (verified) ----------
 HUB75_I2S_CFG::i2s_pins pins = {
@@ -16,23 +18,13 @@ HUB75_I2S_CFG::i2s_pins pins = {
   14, 38, 13         // LAT, OE, CLK
 };
 
-// ---------- Settings ----------
+// ---------- Fixed settings (the rest are on the settings page) ----------
 const uint8_t PANEL_ROTATION = 1;    // quarter-turns (0-3)
-const uint8_t BRIGHTNESS = 80;       // 0-255
 const unsigned long POLL_MS = 1500;  // how often to ask Spotify
-const uint16_t FADE_MS = 800;        // crossfade between songs
 const int FPS = 30;                  // animation frame rate
 const int MAX_SRC = 320;             // largest decoded size before downscaling
-
-// Camera orbit around the cover
-const float ORBIT_DEG = 9.0f;        // how far the camera swings each way
-const float ORBIT_PERIOD_S = 10.0f;  // one full left-right-left swing
-const float CAM_DIST = 2.0f;         // lower = stronger perspective
-
-// Pause effect
-const float PAUSE_BORDER = 3.0f;     // black border (LEDs per side) when paused
-const float PAUSE_DIM = 0.45f;       // brightness while paused (1.0 = no dimming)
-const uint16_t PAUSE_ANIM_MS = 700;  // how long the zoom-out/in takes
+const float CAM_DIST = 3.0f;         // lower = stronger perspective
+const uint16_t PAUSE_ANIM_MS = 700;  // how long the pause zoom-out/in takes
 
 // ---------- Buffers ----------
 const int W = 64, H = 64, NPIX = W * H;
@@ -55,11 +47,12 @@ Art *pending = &artB;         // being prepared (network task fills this)
 bool pendingReady = false;    // protected by artMutex
 SemaphoreHandle_t artMutex;
 volatile bool isPlaying = true;
+volatile bool otaActive = false;  // a Wi-Fi code push is running
+volatile int otaProgress = 0;     // 0-100
 
 uint8_t *outFrame = nullptr;   // RGB888 frame rendered from the art
 uint8_t *blendFrame = nullptr; // RGB888 crossfade result
 uint8_t *fadeFrom = nullptr;   // RGB888 snapshot of the old picture
-float orbitZoom = 1.0f;        // computed at startup so edges never show
 
 // =====================================================================
 //  Art hand-over between the two cores
@@ -127,7 +120,6 @@ bool connectWiFi() {
   return false;
 }
 
-// Download a file into PSRAM. Returns buffer (caller frees) or nullptr.
 // Download a file into PSRAM. Returns buffer (caller frees) or nullptr.
 // Keeps one connection to the image server open between downloads.
 uint8_t *downloadFile(const char *url, size_t &outLen) {
@@ -274,11 +266,16 @@ void networkTask(void *) {
     showMessage("NO WIFI");
     vTaskDelay(pdMS_TO_TICKS(10000));
   }
+  webBegin();  // settings page + Wi-Fi updates
   showMessage("SPOTIFY");
   spotifyBegin();
 
   String shownTrackId;
   for (;;) {
+    if (otaActive) {  // stay quiet while new code is being installed
+      vTaskDelay(pdMS_TO_TICKS(500));
+      continue;
+    }
     if (WiFi.status() != WL_CONNECTED) {
       showMessage("NO WIFI");
       shownTrackId = "";
@@ -343,8 +340,7 @@ void pushFrame(const uint8_t *f) {
   }
 }
 
-// Map a screen point (X, Y in -1..1) to cover coordinates (s, t in -1..1)
-// for a camera swung by 'theta' around a flat cover. Returns lambda (depth).
+// Map a screen column (X in -1..1) onto the tilted cover. Returns depth.
 inline float projectColumn(float X, float ct, float st, float f, float &s) {
   float lam = CAM_DIST * ct / (ct - st * X / f);
   s = lam * X / f * ct + (lam - CAM_DIST) * st;
@@ -352,8 +348,8 @@ inline float projectColumn(float X, float ct, float st, float f, float &s) {
 }
 
 // Smallest zoom that keeps the cover filling the screen at the widest swing
-float computeOrbitZoom() {
-  float th = ORBIT_DEG * DEG_TO_RAD, ct = cosf(th), st = sinf(th);
+float computeOrbitZoom(float deg) {
+  float th = deg * DEG_TO_RAD, ct = cosf(th), st = sinf(th);
   for (float k = 1.0f; k < 1.5f; k += 0.002f) {
     float f = CAM_DIST * k;
     bool ok = true;
@@ -423,9 +419,8 @@ void handleSerial() {
     char c = Serial.read();
     if (c == '\n' || c == '\r') {
       if (input.length()) {
-        int b = constrain(input.toInt(), 0, 255);
-        display->setBrightness8(b);
-        Serial.printf("Brightness set to %d\n", b);
+        settings.brightness = constrain(input.toInt(), 0, 255);
+        Serial.printf("Brightness set to %d\n", settings.brightness);
         input = "";
       }
     } else if (isDigit(c)) {
@@ -441,6 +436,7 @@ void handleSerial() {
 void setup() {
   Serial.begin(115200);
   delay(1000);
+  settingsLoad();
 
   HUB75_I2S_CFG cfg(W, H, 1, pins);
   cfg.driver = HUB75_I2S_CFG::FM6126A;  // panel uses FM6124 chips
@@ -451,7 +447,7 @@ void setup() {
     Serial.println("Display init FAILED");
     while (true) delay(1000);
   }
-  display->setBrightness8(BRIGHTNESS);
+  display->setBrightness8(settings.brightness);
   display->clearScreen();
 
   artA.px    = (uint8_t *)ps_calloc(ART * ART * 3, 1);
@@ -465,9 +461,6 @@ void setup() {
     while (true) delay(1000);
   }
 
-  orbitZoom = computeOrbitZoom();
-  Serial.printf("Orbit zoom: %.3f\n", orbitZoom);
-
   artMutex = xSemaphoreCreateMutex();
   xTaskCreatePinnedToCore(networkTask, "network", 16384, nullptr, 1, nullptr, 0);
   Serial.println("Display started");
@@ -480,6 +473,8 @@ void loop() {
   static bool fading = false;
   static unsigned long fadeStart = 0;
   static const uint8_t *lastShown = nullptr;
+  static uint8_t appliedBrightness = 0;
+  static float zoomForDeg = -1.0f, orbitZoom = 1.0f;
 
   handleSerial();
   unsigned long now = millis();
@@ -489,6 +484,32 @@ void loop() {
   }
   float dt = lastFrame ? (now - lastFrame) / 1000.0f : 0;
   lastFrame = now;
+
+  // Apply settings changed from the web page
+  if (settings.brightness != appliedBrightness) {
+    appliedBrightness = settings.brightness;
+    display->setBrightness8(appliedBrightness);
+  }
+  if (settings.orbitDeg != zoomForDeg) {
+    zoomForDeg = settings.orbitDeg;
+    orbitZoom = computeOrbitZoom(zoomForDeg);
+  }
+
+  // While new code is installed over Wi-Fi, show a progress bar
+  if (otaActive) {
+    memset(outFrame, 0, NPIX * 3);
+    int barW = otaProgress * W / 100;
+    for (int y = 30; y < 34; y++) {
+      for (int x = 0; x < barW; x++) {
+        uint8_t *p = &outFrame[(y * W + x) * 3];
+        p[0] = 30; p[1] = 185; p[2] = 84;
+      }
+    }
+    pushFrame(outFrame);
+    display->flipDMABuffer();
+    lastShown = outFrame;
+    return;
+  }
 
   // Pick up new art from the network task
   bool newArt = false;
@@ -517,9 +538,10 @@ void loop() {
     float pe = pauseAmt * pauseAmt * (3.0f - 2.0f * pauseAmt);  // ease-in-out
 
     animTime += dt * (1.0f - pe);  // camera glides to a stop when paused
-    float theta = ORBIT_DEG * DEG_TO_RAD * sinf(TWO_PI * animTime / ORBIT_PERIOD_S);
-    float shrink = 1.0f - pe * PAUSE_BORDER / (W / 2.0f);
-    float gain = 1.0f - pe * (1.0f - PAUSE_DIM);
+    float period = max(1.0f, settings.orbitPeriodS);
+    float theta = settings.orbitDeg * DEG_TO_RAD * sinf(TWO_PI * animTime / period);
+    float shrink = 1.0f - pe * settings.pauseBorder / (W / 2.0f);
+    float gain = 1.0f - pe * (1.0f - settings.pauseDim);
     renderView(current, theta, orbitZoom, shrink, gain, outFrame);
   } else {
     pauseAmt = 0;
@@ -529,16 +551,21 @@ void loop() {
   const uint8_t *show = outFrame;
   if (fading) {
     unsigned long e = now - fadeStart;
-    if (e >= FADE_MS) {
+    if (e >= settings.fadeMs) {
       fading = false;
     } else {
-      int t = e * 255 / FADE_MS;
+      int t = e * 255 / settings.fadeMs;
       t = t * t * (765 - 2 * t) / 65025;  // ease-in-out curve
       for (int i = 0; i < NPIX * 3; i++) {
         blendFrame[i] = fadeFrom[i] + (outFrame[i] - fadeFrom[i]) * t / 255;
       }
       show = blendFrame;
     }
+  }
+
+  if (!settings.displayOn) {  // "Display on" switched off on the settings page
+    memset(blendFrame, 0, NPIX * 3);
+    show = blendFrame;
   }
 
   pushFrame(show);
