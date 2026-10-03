@@ -18,6 +18,10 @@ static const float EYE_RX = 6.6f, EYE_RY = 7.4f, PUPIL_R = 3.6f;
 static const float LID_AWAKE = 0.10f;  // how far the upper lid covers the eye normally (0-1)
 static const float LID_SLEEPY = 0.50f; // between 23:00 and 06:00
 
+// Bottom strip, top to bottom: face ends at row 45 | 3 blank | temperature rows 49-53 |
+// 3 blank | AM/PM rows 57-61. The time digits (rows 49-62) start level with the temperature.
+static const int TIME_Y = 49, TEMP_Y = 49, AMPM_Y = 57;
+
 // Colours (r, g, b)
 static const float YELLOW_LIGHT[3] = {255, 224, 64}, YELLOW_DARK[3] = {250, 176, 10};
 static const float EYE_WHITE[3] = {255, 242, 247}, INK[3] = {16, 9, 4}, BROW[3] = {10, 5, 2};
@@ -479,11 +483,9 @@ static void micro(int x, int y, const uint8_t rows[5], const float c[3]) {
       if (rows[row] & (4 >> col)) blend(x + col, y + row, c, 1.0f);
 }
 
-// The right-hand column (x 53..63) holds AM/PM and, above it, the temperature, so they stay
-// put whatever the hour is; the time is centred in the space to their left.
-static const int SIDE_X = 53, SIDE_W = 11;
-
-static void drawTime(const ClockInfo &info) {
+// Time centred on the panel with AM/PM right after it. Returns the x of the AM/PM letters
+// (the temperature sits above them), or -1 if the time is unknown.
+static int drawTime(const ClockInfo &info) {
   int d[4], hourDigits = 2;
   if (info.timeKnown) {
     int h = info.hour % 12;
@@ -498,10 +500,10 @@ static void drawTime(const ClockInfo &info) {
     d[0] = d[1] = d[2] = d[3] = 10;  // "--:--"
   }
 
-  // digit 10 wide, 2 gap; colon 2 wide
+  // digit 10 wide, 2 gap; colon 2 wide; then "AM"/"PM" 7 wide
   int width = hourDigits * 12 - 2 + 2 + 2 + 2 + 22;
-  int space = info.timeKnown ? SIDE_X - 2 : W;  // keep 2 clear pixels before the right-hand column
-  int x = (space - width) / 2, y = 49;
+  if (info.timeKnown) width += 3 + 7;
+  int x = (W - width) / 2, y = TIME_Y;
 
   int i = 0;
   for (int k = 0; k < hourDigits; k++, i++, x += 12) glyph(x, y, d[i], 2, TIME_COL);
@@ -512,11 +514,11 @@ static void drawTime(const ClockInfo &info) {
   x += 4;
   for (int k = 0; k < 2; k++, i++, x += 12) glyph(x, y, d[i], 2, TIME_COL);
 
-  if (info.timeKnown) {
-    int ax = SIDE_X + 2;  // 7 pixels wide, centred in the column
-    micro(ax, y + 9, info.hour < 12 ? MICRO_A : MICRO_P, AMPM_COL);
-    micro(ax + 4, y + 9, MICRO_M, AMPM_COL);
-  }
+  if (!info.timeKnown) return -1;
+  x += 1;
+  micro(x, AMPM_Y, info.hour < 12 ? MICRO_A : MICRO_P, AMPM_COL);
+  micro(x + 4, AMPM_Y, MICRO_M, AMPM_COL);
+  return x;
 }
 
 // ---- Temperature: 3x5 digits so "35" and the degree ring fit the 11-pixel column ----
@@ -524,7 +526,7 @@ static const uint8_t MICRO_DIGITS[11][5] = {{7, 5, 5, 5, 7}, {2, 6, 2, 2, 7}, {7
                                             {5, 5, 7, 1, 1}, {7, 4, 7, 1, 7}, {7, 4, 7, 5, 7}, {7, 1, 2, 2, 2},
                                             {7, 5, 7, 5, 7}, {7, 5, 7, 1, 7}, {0, 0, 7, 0, 0}};  // 10 = minus
 
-static void drawTemp(const ClockInfo &info) {
+static void drawTemp(const ClockInfo &info, int ampmX) {
   int v = info.tempC;
   int digits[3], n = 0;
   if (v < 0) digits[n++] = 10;
@@ -534,7 +536,8 @@ static void drawTemp(const ClockInfo &info) {
   digits[n++] = v % 10;
   bool ring = n < 3;  // three characters (e.g. -12) leave no room for the ring
   int width = n * 4 - 1 + (ring ? 4 : 0);
-  int x = SIDE_X + (SIDE_W - width) / 2, y = 49;  // top lines up with the time digits
+  int slotX = ampmX >= 0 ? ampmX - 2 : 53;  // 11 wide, centred over AM/PM
+  int x = slotX + (11 - width) / 2, y = TEMP_Y;
   for (int i = 0; i < n; i++, x += 4) micro(x, y, MICRO_DIGITS[digits[i]], TEMP_COL);
   if (ring) {
     static const uint8_t degree[5] = {2, 5, 2, 0, 0};  // 3x3 ring at the top
@@ -548,6 +551,6 @@ void clockDraw(uint8_t *rgb, const ClockInfo &info, uint32_t ms) {
   Pose pose = animate(info, ms);
   drawHead(pose);
   drawFace(pose, ms);
-  drawTime(info);
-  if (info.weatherKnown) drawTemp(info);
+  int ampmX = drawTime(info);
+  if (info.weatherKnown) drawTemp(info, ampmX);
 }
