@@ -514,12 +514,12 @@ static ClockInfo currentClockInfo() {
     ci.timeKnown = true;
     ci.hour = t.tm_hour;
     ci.minute = t.tm_min;
+    ci.isDay = t.tm_hour >= 6 && t.tm_hour < 18;  // sun until 6 pm, then the moon until 6 am
   }
   WeatherNow w;
   if (weatherGet(w)) {
     ci.weatherKnown = true;
     ci.weather = w.kind;
-    ci.isDay = w.isDay;
     ci.tempC = w.tempC;
   }
   return ci;

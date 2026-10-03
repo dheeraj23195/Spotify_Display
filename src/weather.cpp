@@ -35,7 +35,7 @@ static bool fetch() {
   http.useHTTP10(true);
   http.setTimeout(5000);
   if (!http.begin(client, "https://api.open-meteo.com/v1/forecast?latitude=" WEATHER_LAT
-                          "&longitude=" WEATHER_LON "&current=temperature_2m,weather_code,is_day")) {
+                          "&longitude=" WEATHER_LON "&current=temperature_2m,weather_code")) {
     return false;
   }
   int code = http.GET();
@@ -55,7 +55,6 @@ static bool fetch() {
   WeatherNow w;
   w.tempC = (int)lroundf(cur["temperature_2m"].as<float>());
   w.kind = kindFromCode(cur["weather_code"].as<int>());
-  w.isDay = (cur["is_day"] | 1) != 0;
   portENTER_CRITICAL(&lock);
   latest = w;
   haveReading = true;
