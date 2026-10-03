@@ -4,6 +4,7 @@
 struct WeatherNow {
   int tempC;
   WeatherKind kind;
+  bool isDay;
 };
 
 // Network task: call every loop. Fetches the current weather from Open-Meteo (free, no
