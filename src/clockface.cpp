@@ -23,14 +23,16 @@ void clockDraw(Adafruit_GFX &g, const struct tm *now) {
 
   char buf[16];
   if (now) {
-    snprintf(buf, sizeof(buf), "%02d:%02d", now->tm_hour, now->tm_min);
+    int h = now->tm_hour % 12;
+    snprintf(buf, sizeof(buf), "%d:%02d", h ? h : 12, now->tm_min);  // 12-hour, no leading zero
   } else {
     strcpy(buf, "--:--");
   }
-  centred(g, buf, 22, 2, rgb(63, 216, 194));
+  centred(g, buf, 16, 2, rgb(63, 216, 194));
 
   if (now) {
+    centred(g, now->tm_hour < 12 ? "AM" : "PM", 34, 1, rgb(63, 216, 194));
     snprintf(buf, sizeof(buf), "%s %d %s", DAYS[now->tm_wday], now->tm_mday, MONTHS[now->tm_mon]);
-    centred(g, buf, 42, 1, rgb(120, 110, 150));
+    centred(g, buf, 46, 1, rgb(120, 110, 150));
   }
 }
