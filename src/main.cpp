@@ -14,6 +14,7 @@
 #include "tls.h"
 #include "health.h"
 #include "weather.h"
+#include "perf.h"
 #include "driver/gpio.h"
 
 // ---------- Panel wiring (verified) ----------
@@ -580,7 +581,9 @@ void setup() {
   }
 
   artMutex = xSemaphoreCreateMutex();
-  xTaskCreatePinnedToCore(networkTask, "network", 16384, nullptr, 1, nullptr, 0);
+  TaskHandle_t netHandle = nullptr;
+  xTaskCreatePinnedToCore(networkTask, "network", 16384, nullptr, 1, &netHandle, 0);
+  perfSetTask(PerfTask::Network, netHandle);
   Serial.println("Display started");
 }
 
@@ -610,6 +613,7 @@ void loop() {
   }
   float dt = lastFrame ? (now - lastFrame) / 1000.0f : 0;
   lastFrame = now;
+  uint32_t frameStartUs = micros();
 
   // Apply settings changed from the web page
   if (settings.brightness != appliedBrightness) {
@@ -698,6 +702,8 @@ void loop() {
   }
 
   pushFrame(show);
+  uint32_t composedUs = micros();
   display->flipDMABuffer();  // show the finished frame all at once
+  perfFrame(composedUs - frameStartUs, micros() - composedUs);
   lastShown = show;
 }

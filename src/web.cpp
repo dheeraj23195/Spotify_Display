@@ -9,6 +9,7 @@
 #include "secrets.h"
 #include "spotify.h"
 #include "icon.h"
+#include "perf.h"
 
 extern volatile bool otaActive;   // defined in main.cpp
 extern volatile int otaProgress;
@@ -246,6 +247,22 @@ static String settingsPage() {
              WiFi.RSSI(), spotifyStats.polls, spotifyStats.failures,
              spotifyStats.lastMs, spotifyStats.lastCode,
              avg, spotifyStats.worstMs, up / 3600, (up / 60) % 60);
+    h += buf;
+  }
+
+  {
+    PerfSnapshot p = perfGet();
+    char buf[520];
+    snprintf(buf, sizeof(buf),
+             "<h2>Performance</h2><p class='status'>"
+             "Frame build: %u us avg, %u us max (33333 us per frame = %u%% busy)<br>"
+             "Waiting for panel: %u us<br>"
+             "Free memory: %u KB (lowest %u KB, largest block %u KB)<br>"
+             "Free PSRAM: %u KB<br>"
+             "Stack left: network %u B, web %u B</p>",
+             p.composeAvgUs, p.composeMaxUs, p.composeAvgUs * 100 / 33333, p.flipAvgUs,
+             p.freeHeap / 1024, p.minFreeHeap / 1024, p.largestBlock / 1024, p.freePsram / 1024,
+             p.netStackFree, p.webStackFree);
     h += buf;
   }
 
@@ -525,7 +542,9 @@ void webBegin() {
   server.begin();
   MDNS.addService("http", "tcp", 80);
 
-  xTaskCreatePinnedToCore(webTask, "web", 12288, nullptr, 1, nullptr, 0);
+  TaskHandle_t webHandle = nullptr;
+  xTaskCreatePinnedToCore(webTask, "web", 12288, nullptr, 1, &webHandle, 0);
+  perfSetTask(PerfTask::Web, webHandle);
   Serial.printf("Settings page: http://%s.local  (or http://%s)\n",
                 HOSTNAME, WiFi.localIP().toString().c_str());
 }
