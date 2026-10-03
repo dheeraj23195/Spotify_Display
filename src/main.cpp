@@ -26,6 +26,7 @@ HUB75_I2S_CFG::i2s_pins pins = {
 // ---------- Fixed settings (the rest are on the settings page) ----------
 const uint8_t PANEL_ROTATION = 1;    // quarter-turns (0-3)
 const unsigned long POLL_MS = 1500;  // how often to ask Spotify
+const unsigned long CLOCK_AFTER_PAUSE_MS = 60000;  // paused this long -> show the clock
 const int FPS = 30;                  // animation frame rate
 const int MAX_SRC = 320;             // largest decoded size before downscaling
 const float CAM_DIST = 3.0f;         // lower = stronger perspective
@@ -336,6 +337,7 @@ void networkTask(void *) {
 
   String shownTrackId;
   int failsInARow = 0;
+  unsigned long pausedSince = 0;  // when we first saw the current pause (0 = not paused)
   unsigned long lastWiFiKick = 0;
   for (;;) {
     if (otaActive) {  // stay quiet while new code is being installed
@@ -358,6 +360,15 @@ void networkTask(void *) {
     switch (result) {
       case SpotifyResult::Ok:
         isPlaying = np.isPlaying;
+        if (np.isPlaying) {
+          pausedSince = 0;
+        } else if (!pausedSince) {
+          pausedSince = millis();
+        }
+        if (!np.isPlaying && millis() - pausedSince >= CLOCK_AFTER_PAUSE_MS) {
+          shownTrackId = "idle";  // long pause: clock; the cover reloads when playback resumes
+          break;
+        }
         if (np.trackId != shownTrackId) {
           if (np.artUrl.isEmpty()) {
             showMessage("NO ART");
@@ -370,6 +381,7 @@ void networkTask(void *) {
         break;
       case SpotifyResult::NothingPlaying:
         isPlaying = false;
+        pausedSince = 0;
         shownTrackId = "idle";
         break;
       case SpotifyResult::RateLimited:
