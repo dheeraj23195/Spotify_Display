@@ -12,6 +12,7 @@
 
 extern volatile bool otaActive;   // defined in main.cpp
 extern volatile int otaProgress;
+extern volatile bool isPlaying;
 
 static const char *HOSTNAME = "wall-display";
 static const char *WEB_USER = "admin";
@@ -23,6 +24,7 @@ static Preferences sessPrefs;
 static String sessions[MAX_SESSIONS];    // saved so logins survive restarts
 static int nextSlot = 0;
 static bool uploadAuthorized = false;
+static String apiToken;                  // for Shortcuts and other scripts
 
 // =====================================================================
 //  Shared page header (styles + icon links)
@@ -61,6 +63,7 @@ static const char HEAD[] =
     ".status{margin:6px 0 0;line-height:1.7}"
     ".note{min-height:1.4em;margin-top:10px;color:var(--teal)}"
     ".err{color:var(--err)}"
+    ".hint{margin:4px 0 0;color:var(--muted);font-size:.9em}"
     "</style></head><body>"
     "<header><img src='/icon.png' alt=''><h1>Wall Display</h1></header>";
 
@@ -77,6 +80,17 @@ static void loadSessions() {
     sessions[i] = sessPrefs.isKey(k.c_str()) ? sessPrefs.getString(k.c_str()) : "";
   }
   nextSlot = sessPrefs.isKey("next") ? sessPrefs.getInt("next") % MAX_SESSIONS : 0;
+}
+
+static String newToken();
+
+// The Shortcuts token is made on the first start and kept in flash
+static void loadApiToken() {
+  apiToken = sessPrefs.getString("apitok", "");
+  if (apiToken.length() != 32) {
+    apiToken = newToken();
+    sessPrefs.putString("apitok", apiToken);
+  }
 }
 
 static void saveSession(int i) {
@@ -195,7 +209,7 @@ static String slider(const char *name, const char *label, float value,
 
 static String settingsPage() {
   String h = HEAD;
-  h.reserve(7000);
+  h.reserve(8000);
   h += F("<form id='f'>");
 
   h += F("<h2>Display</h2>");
@@ -233,6 +247,14 @@ static String settingsPage() {
     h += buf;
   }
 
+  h += F("<h2>Shortcuts</h2>"
+         "<p class='hint'>Token for iOS Shortcuts and scripts. "
+         "Anyone who has it can switch the display on and off.</p>"
+         "<input type='text' id='tok' readonly value='");
+  h += apiToken;
+  h += F("'><button type='button' id='cp'>Copy token</button>"
+         "<button type='button' id='nt'>Make a new token</button>");
+
   h += F("<h2>Maintenance</h2>"
          "<a class='btn' href='/update'>Upload firmware file</a>"
          "<button type='button' id='rs'>Restart display</button>"
@@ -246,6 +268,17 @@ static String settingsPage() {
          "st.textContent=r.ok?'Saved':'Could not save. Check the display is on Wi-Fi.';})"
          ".catch(()=>{st.className='note err';"
          "st.textContent='Could not save. Check the display is on Wi-Fi.';});});"
+         "const tk=document.getElementById('tok');"
+         "document.getElementById('cp').onclick=()=>{"
+         "tk.focus();tk.select();tk.setSelectionRange(0,99);let ok=false;"
+         "try{ok=document.execCommand('copy');}catch(e){}"
+         "st.className='note'+(ok?'':' err');"
+         "st.textContent=ok?'Token copied':'Could not copy. Hold the token to copy it.';};"
+         "document.getElementById('nt').onclick=()=>{"
+         "if(confirm('Make a new token? Shortcuts using the old one stop working.'))"
+         "fetch('/token/new',{method:'POST'}).then(r=>r.ok?r.text():Promise.reject())"
+         ".then(t=>{tk.value=t;st.className='note';st.textContent='New token ready';})"
+         ".catch(()=>{st.className='note err';st.textContent='Could not make a new token.';});};"
          "document.getElementById('rs').onclick=()=>{"
          "if(confirm('Restart the display?'))"
          "fetch('/restart',{method:'POST'}).then(()=>{st.className='note';"
@@ -279,11 +312,75 @@ static void handleSave() {
   server.send(200, "text/plain", "OK");
 }
 
+static void handleNewToken() {
+  if (!requireApi()) return;
+  apiToken = newToken();
+  sessPrefs.putString("apitok", apiToken);
+  server.send(200, "text/plain", apiToken);
+}
+
 static void handleRestart() {
   if (!requireApi()) return;
   server.send(200, "text/plain", "Restarting");
   delay(500);
   ESP.restart();
+}
+
+// =====================================================================
+//  Token API for Shortcuts (GET or POST, no login cookie needed)
+//    /api/on  /api/off  /api/toggle  /api/status  /api/brightness?percent=40
+//  The token goes in ?token=... or in an "Authorization: Bearer ..." header.
+// =====================================================================
+
+static bool requireToken() {
+  String given = server.arg("token");
+  if (given.isEmpty() && server.hasHeader("Authorization")) {
+    String a = server.header("Authorization");
+    if (a.startsWith("Bearer ")) given = a.substring(7);
+  }
+  given.trim();
+  // Compare every character so the time taken doesn't reveal how much matched
+  uint8_t diff = given.length() != apiToken.length();
+  for (size_t i = 0; i < apiToken.length(); i++) {
+    diff |= (i < given.length() ? given[i] : 0) ^ apiToken[i];
+  }
+  if (diff == 0) return true;
+  delay(1000);  // slows down guessing
+  server.send(401, "text/plain", "Bad token");
+  return false;
+}
+
+static void sendApiStatus() {
+  char buf[96];
+  snprintf(buf, sizeof(buf),
+           "{\"on\":%s,\"brightness\":%u,\"percent\":%u,\"playing\":%s}",
+           settings.displayOn ? "true" : "false", settings.brightness,
+           (settings.brightness * 100u + 127) / 255, isPlaying ? "true" : "false");
+  server.send(200, "application/json", buf);
+}
+
+static void apiSetOn(bool on) {
+  settings.displayOn = on;
+  settingsSave();
+  sendApiStatus();
+}
+
+static void handleApiOn()  { if (requireToken()) apiSetOn(true); }
+static void handleApiOff() { if (requireToken()) apiSetOn(false); }
+static void handleApiToggle() { if (requireToken()) apiSetOn(!settings.displayOn); }
+static void handleApiStatus() { if (requireToken()) sendApiStatus(); }
+
+static void handleApiBrightness() {
+  if (!requireToken()) return;
+  String v = server.arg("percent");
+  if (v.isEmpty() || !isDigit(v[0])) {
+    server.send(400, "text/plain", "Use ?percent=0-100");
+    return;
+  }
+  float pct = constrain(v.toFloat(), 0.0f, 100.0f);
+  settings.brightness = constrain((int)(pct * 2.55f + 0.5f), 5, 255);  // same floor as the slider
+  settingsSave();
+  sendApiStatus();
 }
 
 // =====================================================================
@@ -371,6 +468,7 @@ static void webTask(void *) {
 
 void webBegin() {
   loadSessions();
+  loadApiToken();
 
   // Code push from VS Code over Wi-Fi
   ArduinoOTA.setHostname(HOSTNAME);
@@ -393,8 +491,8 @@ void webBegin() {
   });
   ArduinoOTA.begin();  // also makes the device reachable as wall-display.local
 
-  const char *headerKeys[] = {"Cookie"};
-  server.collectHeaders(headerKeys, 1);
+  const char *headerKeys[] = {"Cookie", "Authorization"};
+  server.collectHeaders(headerKeys, 2);
 
   server.on("/", HTTP_GET, handleRoot);
   server.on("/login", HTTP_GET, handleLoginPage);
@@ -402,6 +500,12 @@ void webBegin() {
   server.on("/logout", HTTP_GET, handleLogout);
   server.on("/save", HTTP_POST, handleSave);
   server.on("/restart", HTTP_POST, handleRestart);
+  server.on("/token/new", HTTP_POST, handleNewToken);
+  server.on("/api/on", HTTP_ANY, handleApiOn);
+  server.on("/api/off", HTTP_ANY, handleApiOff);
+  server.on("/api/toggle", HTTP_ANY, handleApiToggle);
+  server.on("/api/status", HTTP_ANY, handleApiStatus);
+  server.on("/api/brightness", HTTP_ANY, handleApiBrightness);
   server.on("/update", HTTP_GET, handleUpdatePage);
   server.on("/update", HTTP_POST, handleUpdateDone, handleUpdateUpload);
   server.on("/icon.png", HTTP_GET, handleIcon);
