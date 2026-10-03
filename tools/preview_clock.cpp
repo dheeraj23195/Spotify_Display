@@ -17,9 +17,7 @@ int main(int argc, char **argv) {
     if (!strcmp(k, "--hour")) info.hour = atoi(v);
     else if (!strcmp(k, "--min")) info.minute = atoi(v);
     else if (!strcmp(k, "--notime")) info.timeKnown = false;
-    else if (!strcmp(k, "--weather")) { info.weatherKnown = true; info.weather = (WeatherKind)atoi(v); }
-    else if (!strcmp(k, "--day")) info.isDay = atoi(v) != 0;
-    else if (!strcmp(k, "--temp")) info.tempC = atoi(v);
+    else if (!strcmp(k, "--temp")) { info.weatherKnown = true; info.tempC = atoi(v); }  // shows the temperature
     else if (!strcmp(k, "--seconds")) seconds = atof(v);
     else if (!strcmp(k, "--minchange")) minuteChangeAt = atof(v);
     else if (!strcmp(k, "--mood")) clockForceMood(atoi(v));

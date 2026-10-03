@@ -518,8 +518,6 @@ static ClockInfo currentClockInfo() {
   WeatherNow w;
   if (weatherGet(w)) {
     ci.weatherKnown = true;
-    ci.weather = w.kind;
-    ci.isDay = w.isDay;
     ci.tempC = w.tempC;
   }
   return ci;

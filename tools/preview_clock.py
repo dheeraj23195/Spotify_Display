@@ -31,12 +31,8 @@ def sheet(items, cols, label_h=14):
 day = frames("day")
 items = [("12:45 PM  t=0.5s", day[15]), ("t=2.0s", day[60]), ("t=4.5s (new minute: looks down)", day[135]),
          ("9:07 AM", frames("morning")[40]), ("2:10 AM (sleepy lids)", frames("night")[100]), ("no time yet", frames("notime")[30])]
-for k, name in enumerate(["clear 36", "partly 28", "cloudy 24", "fog 12", "rain 19", "snow -2", "storm 22"]):
-    items.append((name, frames("w%d" % k)[60]))
-items.append(("clear night 18", frames("n0")[60]))
-items.append(("temperature phase (6.5 s)", frames("w0")[195]))
-items.append(("temperature -2", frames("w5")[195]))
-items.append(("partly night 18", frames("n1")[60]))
+for name, key in [("36 deg, 2:15 PM", "w36"), ("5 deg, 9:07 AM (1-digit hour)", "w5"), ("-2 deg", "wm2"), ("-12 deg (no ring)", "wm12")]:
+    items.append((name, frames(key)[60]))
 sheet(items, 3).save(os.path.join(out, "sheet.png"))
 
 gif = [dots(f).convert("P", palette=Image.ADAPTIVE, colors=128) for f in day[::2]]
