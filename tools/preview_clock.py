@@ -34,6 +34,8 @@ items = [("12:45 PM  t=0.5s", day[15]), ("t=2.0s", day[60]), ("t=4.5s (new minut
 for k, name in enumerate(["clear 36", "partly 28", "cloudy 24", "fog 12", "rain 19", "snow -2", "storm 22"]):
     items.append((name, frames("w%d" % k)[60]))
 items.append(("clear night 18", frames("n0")[60]))
+items.append(("temperature phase (6.5 s)", frames("w0")[195]))
+items.append(("temperature -2", frames("w5")[195]))
 items.append(("partly night 18", frames("n1")[60]))
 sheet(items, 3).save(os.path.join(out, "sheet.png"))
 

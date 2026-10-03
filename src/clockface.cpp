@@ -29,12 +29,14 @@ static const float TEMP_COL[3] = {190, 215, 240};
 // =====================================================================
 
 static uint8_t *fb;
+static float layerAlpha = 1.0f;  // multiplies everything drawn (used to fade the weather slot)
 
 static inline float clamp01(float v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
 static inline float mixf(float a, float b, float t) { return a + (b - a) * t; }
 
 // Blend a colour over a pixel; a = coverage 0-1
 static inline void blend(int x, int y, const float c[3], float a) {
+  a *= layerAlpha;
   if (a <= 0.0f || x < 0 || y < 0 || x >= W || y >= H) return;
   uint8_t *p = &fb[(y * W + x) * 3];
   for (int i = 0; i < 3; i++) p[i] = (uint8_t)(p[i] + (c[i] - p[i]) * a + 0.5f);
@@ -225,9 +227,9 @@ static Pose animate(const ClockInfo &info, uint32_t ms) {
       case G_REST:   tx = 0; ty = 0.4f; wait = 2000; break;
       default: {  // wander
         float r = rnd();
-        if (info.weatherKnown && r < 0.12f) {  // peek up at the weather in the corners
-          tx = rnd() < 0.5f ? -1.0f : 1.0f;
-          ty = -0.9f;
+        if (info.weatherKnown && r < 0.12f) {  // peek down-right at the weather above PM
+          tx = 1.0f;
+          ty = 0.9f;
         } else if (r < 0.45f) {  // back to looking at you
           tx = (rnd() - 0.5f) * 0.3f;
           ty = (rnd() - 0.5f) * 0.3f;
@@ -479,7 +481,8 @@ static void micro(int x, int y, const uint8_t rows[5], const float c[3]) {
       if (rows[row] & (4 >> col)) blend(x + col, y + row, c, 1.0f);
 }
 
-static void drawTime(const ClockInfo &info) {
+// Returns the x of the AM/PM letters (the weather sits above them), or -1 if the time is unknown
+static int drawTime(const ClockInfo &info) {
   int d[4], hourDigits = 2;
   if (info.timeKnown) {
     int h = info.hour % 12;
@@ -509,14 +512,14 @@ static void drawTime(const ClockInfo &info) {
   x += 4;
   for (int k = 0; k < 2; k++, i++, x += 12) glyph(x, y, d[i], 2, TIME_COL);
 
-  if (info.timeKnown) {
-    x += 1;
-    micro(x, y + 9, info.hour < 12 ? MICRO_A : MICRO_P, AMPM_COL);
-    micro(x + 4, y + 9, MICRO_M, AMPM_COL);
-  }
+  if (!info.timeKnown) return -1;
+  x += 1;
+  micro(x, y + 9, info.hour < 12 ? MICRO_A : MICRO_P, AMPM_COL);
+  micro(x + 4, y + 9, MICRO_M, AMPM_COL);
+  return x;
 }
 
-// ---- Weather icons (11x11 box in the top-left corner) ----
+// ---- Weather icons (11x11 box, drawn with its top-left at ox, oy) ----
 static const float SUN_COL[3] = {255, 206, 40}, MOON_COL[3] = {255, 244, 205};
 static const float CLOUD_COL[3] = {214, 224, 242}, CLOUD_GREY[3] = {165, 176, 198}, CLOUD_DARK[3] = {120, 130, 152};
 static const float RAIN_COL[3] = {90, 165, 255}, SNOW_COL[3] = {245, 248, 255};
@@ -558,8 +561,7 @@ static void moon(float cx, float cy, float r) {
         MOON_COL);
 }
 
-static void drawWeatherIcon(const ClockInfo &info, uint32_t ms) {
-  const float ox = 1.0f, oy = 1.0f;
+static void drawWeatherIcon(const ClockInfo &info, uint32_t ms, float ox, float oy) {
   float t = (ms % 60000) * 0.001f;  // every motion below repeats within 60 s
   switch (info.weather) {
     case WeatherKind::Clear:
@@ -584,7 +586,7 @@ static void drawWeatherIcon(const ClockInfo &info, uint32_t ms) {
       cloud(ox, oy - 0.5f, 0.9f, CLOUD_GREY);
       for (int i = 0; i < 3; i++) {
         float f = fmodf(t * 1.5f + i * 0.37f, 1.0f);
-        float x = ox + 3.2f + i * 2.8f, y = oy + 6.6f + f * 3.6f;
+        float x = ox + 3.2f + i * 2.8f, y = oy + 6.6f + f * 3.0f;
         capsule(x, y, x - 0.4f, y + 1.3f, 0.5f, RAIN_COL, 1.0f - f * 0.6f);
       }
       break;
@@ -592,7 +594,7 @@ static void drawWeatherIcon(const ClockInfo &info, uint32_t ms) {
       cloud(ox, oy - 0.5f, 0.9f, CLOUD_GREY);
       for (int i = 0; i < 3; i++) {
         float f = fmodf(t * 0.5f + i * 0.33f, 1.0f);
-        float x = ox + 3.2f + i * 2.8f + sinf((t / 6.0f + i * 0.3f) * 6.2832f) * 0.6f, y = oy + 6.8f + f * 3.4f;
+        float x = ox + 3.2f + i * 2.8f + sinf((t / 6.0f + i * 0.3f) * 6.2832f) * 0.6f, y = oy + 6.8f + f * 3.0f;
         disc(x, y, 0.65f, SNOW_COL, 1.0f - f * 0.5f);
       }
       break;
@@ -605,8 +607,12 @@ static void drawWeatherIcon(const ClockInfo &info, uint32_t ms) {
   }
 }
 
-// ---- Temperature (top-right corner), e.g. "31" and a degree ring ----
-static void drawTemp(const ClockInfo &info) {
+// ---- Temperature: 3x5 digits so "35" and the degree ring fit the 11-pixel slot ----
+static const uint8_t MICRO_DIGITS[11][5] = {{7, 5, 5, 5, 7}, {2, 6, 2, 2, 7}, {7, 1, 7, 4, 7}, {7, 1, 7, 1, 7},
+                                            {5, 5, 7, 1, 1}, {7, 4, 7, 1, 7}, {7, 4, 7, 5, 7}, {7, 1, 2, 2, 2},
+                                            {7, 5, 7, 5, 7}, {7, 5, 7, 1, 7}, {0, 0, 7, 0, 0}};  // 10 = minus
+
+static void drawTemp(const ClockInfo &info, int slotX, int slotY) {
   int v = info.tempC;
   int digits[3], n = 0;
   if (v < 0) digits[n++] = 10;
@@ -614,14 +620,26 @@ static void drawTemp(const ClockInfo &info) {
   if (v > 99) v = 99;
   if (v >= 10) digits[n++] = v / 10;
   digits[n++] = v % 10;
-  int width = n * 6 - 1 + 1 + 3;
-  int x = W - 1 - width, y = 2;
-  for (int i = 0; i < n; i++, x += 6) glyph(x, y, digits[i], 1, TEMP_COL);
-  x += 0;
-  static const uint8_t ring[3][3] = {{0, 1, 0}, {1, 0, 1}, {0, 1, 0}};
-  for (int r = 0; r < 3; r++)
-    for (int c = 0; c < 3; c++)
-      if (ring[r][c]) blend(x + c, y + r, TEMP_COL, 1.0f);
+  bool ring = n < 3;  // three characters (e.g. -12) leave no room for the ring
+  int width = n * 4 - 1 + (ring ? 4 : 0);
+  int x = slotX + (11 - width) / 2, y = slotY + 3;
+  for (int i = 0; i < n; i++, x += 4) micro(x, y, MICRO_DIGITS[digits[i]], TEMP_COL);
+  if (ring) {
+    static const uint8_t degree[5] = {2, 5, 2, 0, 0};  // 3x3 ring at the top
+    micro(x, y, degree, TEMP_COL);
+  }
+}
+
+// Icon and temperature take turns in the slot above AM/PM: icon 5 s, temperature 3 s, soft fades
+static void drawWeather(const ClockInfo &info, uint32_t ms, int ampmX) {
+  int slotX = ampmX >= 0 ? ampmX - 2 : 53, slotY = 47;
+  float t = (ms % 8000) * 0.001f;
+  float icon = t < 4.6f ? 1.0f : (t < 5.0f ? 1.0f - (t - 4.6f) / 0.4f : (t < 7.6f ? 0.0f : (t - 7.6f) / 0.4f));
+  layerAlpha = icon;
+  if (icon > 0.0f) drawWeatherIcon(info, ms, (float)slotX, (float)slotY);
+  layerAlpha = 1.0f - icon;
+  if (icon < 1.0f) drawTemp(info, slotX, slotY);
+  layerAlpha = 1.0f;
 }
 
 void clockDraw(uint8_t *rgb, const ClockInfo &info, uint32_t ms) {
@@ -630,9 +648,6 @@ void clockDraw(uint8_t *rgb, const ClockInfo &info, uint32_t ms) {
   Pose pose = animate(info, ms);
   drawHead(pose);
   drawFace(pose, ms);
-  drawTime(info);
-  if (info.weatherKnown) {
-    drawWeatherIcon(info, ms);
-    drawTemp(info);
-  }
+  int ampmX = drawTime(info);
+  if (info.weatherKnown) drawWeather(info, ms, ampmX);
 }
