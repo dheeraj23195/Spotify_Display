@@ -5,4 +5,5 @@
 .vscode/ipch
 .pio/
 include/secrets.h
-ota.inipreview/
+ota.ini
+preview/
