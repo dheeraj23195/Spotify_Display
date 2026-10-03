@@ -22,3 +22,7 @@ struct ClockInfo {
 // panel rotation). Call it every frame from the render loop with a millisecond clock
 // (millis() is fine); the face animates itself from the time between calls.
 void clockDraw(uint8_t *rgb, const ClockInfo &info, uint32_t ms);
+
+// For previews and tests: hold one expression (0 neutral, 1 happy, 2 surprised, 3 smug,
+// 4 disgust, 5 scared, 6 asleep, 7 heart eyes, 8 wink, 9 curious). -1 = random, the default.
+void clockForceMood(int mood);

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Renders the idle clock face on this computer: no display needed.
-#   tools/preview_clock.sh              -> preview/sheet.png (stills) and preview/day.gif (8 s of animation)
+#   tools/preview_clock.sh              -> preview/sheet.png (stills), moods.png (every expression), day.gif and moods.gif (animation)
 # Needs a C++ compiler and python3 (installs pillow + numpy into a temporary venv).
 set -e
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -27,7 +27,12 @@ r w6 --hour 14 --min 15 --weather 6 --day 1 --temp 22 --seconds 4
 r n0 --hour 22 --min 15 --weather 0 --day 0 --temp 18 --seconds 4
 r n1 --hour 22 --min 15 --weather 1 --day 0 --temp 18 --seconds 4
 
+# every expression, held for 3 s each (0 neutral, 1 happy, 2 surprised, 3 smug, 4 disgust,
+# 5 scared, 6 asleep, 7 heart eyes, 8 wink, 9 curious), with weather showing
+r moods --hour 14 --min 15 --weather 1 --day 1 --temp 28 --cycle 3 --seconds 30
+for m in 0 1 2 3 4 5 6 7 8 9; do r m$m --hour 14 --min 15 --weather 0 --day 1 --temp 31 --mood $m --seconds 3; done
+
 python3 -m venv "$tmp/venv"
 "$tmp/venv/bin/pip" -q install pillow numpy 2>/dev/null
 OUT="$out" TMP="$tmp" "$tmp/venv/bin/python" "$root/tools/preview_clock.py"
-echo "Wrote $out/sheet.png and $out/day.gif"
+echo "Wrote $out/sheet.png, $out/moods.png and the GIFs day.gif / moods.gif"

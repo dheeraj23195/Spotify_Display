@@ -39,3 +39,8 @@ sheet(items, 3).save(os.path.join(out, "sheet.png"))
 
 gif = [dots(f).convert("P", palette=Image.ADAPTIVE, colors=128) for f in day[::2]]
 gif[0].save(os.path.join(out, "day.gif"), save_all=True, append_images=gif[1:], duration=66, loop=0)
+
+names = ["neutral", "happy", "surprised", "smug", "disgust", "scared", "asleep", "heart eyes", "wink", "curious"]
+sheet([(n, frames("m%d" % i)[75]) for i, n in enumerate(names)], 5).save(os.path.join(out, "moods.png"))
+mg = [dots(f).convert("P", palette=Image.ADAPTIVE, colors=128) for f in frames("moods")[::2]]
+mg[0].save(os.path.join(out, "moods.gif"), save_all=True, append_images=mg[1:], duration=66, loop=0)

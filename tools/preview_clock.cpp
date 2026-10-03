@@ -10,7 +10,7 @@ int main(int argc, char **argv) {
   info.timeKnown = true;
   info.hour = 12;
   info.minute = 45;
-  float seconds = 8, minuteChangeAt = -1;
+  float seconds = 8, minuteChangeAt = -1, cycleEvery = 0;
   const char *out = "frames.bin";
   for (int i = 1; i + 1 < argc; i += 2) {
     const char *k = argv[i], *v = argv[i + 1];
@@ -22,6 +22,8 @@ int main(int argc, char **argv) {
     else if (!strcmp(k, "--temp")) info.tempC = atoi(v);
     else if (!strcmp(k, "--seconds")) seconds = atof(v);
     else if (!strcmp(k, "--minchange")) minuteChangeAt = atof(v);
+    else if (!strcmp(k, "--mood")) clockForceMood(atoi(v));
+    else if (!strcmp(k, "--cycle")) cycleEvery = atof(v);  // step through every mood, this many seconds each
     else if (!strcmp(k, "--out")) out = v;
   }
   FILE *f = fopen(out, "wb");
@@ -34,6 +36,7 @@ int main(int argc, char **argv) {
       changed = true;
       if (++info.minute == 60) { info.minute = 0; info.hour = (info.hour + 1) % 24; }
     }
+    if (cycleEvery > 0) clockForceMood((int)(i / 30.0f / cycleEvery) % 10);
     clockDraw(frame, info, ms);
     fwrite(frame, 1, sizeof(frame), f);
   }
