@@ -27,7 +27,6 @@ HUB75_I2S_CFG::i2s_pins pins = {
 // ---------- Fixed settings (the rest are on the settings page) ----------
 const uint8_t PANEL_ROTATION = 1;    // quarter-turns (0-3)
 const unsigned long POLL_MS = 1500;  // how often to ask Spotify
-const unsigned long CLOCK_AFTER_PAUSE_MS = 60000;  // paused this long -> show the clock
 const int FPS = 30;                  // animation frame rate
 const int MAX_SRC = 320;             // largest decoded size before downscaling
 const float CAM_DIST = 3.0f;         // lower = stronger perspective
@@ -364,7 +363,7 @@ void networkTask(void *) {
         } else if (!pausedSince) {
           pausedSince = millis();
         }
-        if (!np.isPlaying && millis() - pausedSince >= CLOCK_AFTER_PAUSE_MS) {
+        if (!np.isPlaying && millis() - pausedSince >= settings.clockAfterPauseS * 1000UL) {
           shownTrackId = "idle";  // long pause: clock; the cover reloads when playback resumes
           break;
         }

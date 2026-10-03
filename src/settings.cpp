@@ -13,6 +13,7 @@ void settingsLoad() {
   settings.pauseDim     = prefs.getFloat("pauseDim", settings.pauseDim);
   settings.pauseBorder  = prefs.getFloat("pauseBrd", settings.pauseBorder);
   settings.fadeMs       = prefs.getUShort("fadeMs", settings.fadeMs);
+  settings.clockAfterPauseS = prefs.getUShort("clkPause", settings.clockAfterPauseS);
 }
 
 void settingsSave() {
@@ -23,4 +24,5 @@ void settingsSave() {
   prefs.putFloat("pauseDim", settings.pauseDim);
   prefs.putFloat("pauseBrd", settings.pauseBorder);
   prefs.putUShort("fadeMs", settings.fadeMs);
+  prefs.putUShort("clkPause", settings.clockAfterPauseS);
 }

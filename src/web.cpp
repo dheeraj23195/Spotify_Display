@@ -226,6 +226,7 @@ static String settingsPage() {
   h += F("<h2>Pause look</h2>");
   h += slider("pauseDim", "Brightness when paused", settings.pauseDim, 0.1, 1, 0.05);
   h += slider("pauseBorder", "Border when paused (LEDs)", settings.pauseBorder, 0, 8, 1);
+  h += slider("clockAfterPauseS", "Show clock after pause (seconds)", settings.clockAfterPauseS, 10, 600, 10);
 
   h += F("<h2>Song change</h2>");
   h += slider("fadeMs", "Crossfade (ms)", settings.fadeMs, 0, 3000, 100);
@@ -307,6 +308,8 @@ static void handleSave() {
     settings.pauseDim = constrain(server.arg("pauseDim").toFloat(), 0.1f, 1.0f);
   if (server.hasArg("pauseBorder"))
     settings.pauseBorder = constrain(server.arg("pauseBorder").toFloat(), 0.0f, 8.0f);
+  if (server.hasArg("clockAfterPauseS"))
+    settings.clockAfterPauseS = constrain(server.arg("clockAfterPauseS").toInt(), 10, 600);
   if (server.hasArg("fadeMs"))
     settings.fadeMs = constrain(server.arg("fadeMs").toInt(), 0, 3000);
   settingsSave();

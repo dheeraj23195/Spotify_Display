@@ -9,6 +9,7 @@ struct Settings {
   float pauseDim = 0.45f;      // brightness while paused (0-1)
   float pauseBorder = 3.0f;    // black border when paused (LEDs)
   uint16_t fadeMs = 800;       // crossfade between songs
+  uint16_t clockAfterPauseS = 60;  // paused this long -> show the clock instead
 };
 
 extern Settings settings;
