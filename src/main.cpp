@@ -11,6 +11,7 @@
 #include "web.h"
 #include "timesync.h"
 #include "clockface.h"
+#include "tls.h"
 #include "driver/gpio.h"
 
 // ---------- Panel wiring (verified) ----------
@@ -159,14 +160,14 @@ uint8_t *downloadFile(const char *url, size_t &outLen) {
   static HTTPClient http;
   static bool initialised = false;
   if (!initialised) {
-    client.setInsecure();  // TODO: verify certificates (hardening step)
-    client.setHandshakeTimeout(10);
+    tlsConfigure(client);
     http.setReuse(true);
     http.setTimeout(5000);
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
     initialised = true;
   }
 
+  if (!timeIsSet()) return nullptr;  // certificates can't be checked without the date
   unsigned long t0 = millis();
   if (!http.begin(client, url)) {
     Serial.println("HTTP begin failed");
@@ -319,6 +320,7 @@ void networkTask(void *) {
       continue;
     }
 
+    timeTick();
     NowPlaying np;
     switch (spotifyGetNowPlaying(np)) {
       case SpotifyResult::Ok:
@@ -341,6 +343,12 @@ void networkTask(void *) {
       case SpotifyResult::RateLimited:
         Serial.println("Rate limited by Spotify, waiting 30 s");
         vTaskDelay(pdMS_TO_TICKS(30000));
+        break;
+      case SpotifyResult::NoClock:  // wait for NTP, then try again
+        if (shownTrackId != "noclock") {
+          showMessage("SET TIME");
+          shownTrackId = "noclock";
+        }
         break;
       case SpotifyResult::AuthError:
         Serial.println("Spotify auth problem, will retry");

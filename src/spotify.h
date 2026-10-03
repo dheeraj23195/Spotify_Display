@@ -12,7 +12,7 @@ struct NowPlaying {
   uint32_t durationMs = 0;
 };
 
-enum class SpotifyResult { Ok, NothingPlaying, AuthError, RateLimited, NetworkError };
+enum class SpotifyResult { Ok, NothingPlaying, AuthError, RateLimited, NetworkError, NoClock };
 
 void spotifyBegin();
 SpotifyResult spotifyGetNowPlaying(NowPlaying &np);

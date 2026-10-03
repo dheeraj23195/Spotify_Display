@@ -5,6 +5,9 @@
 // Call once Wi-Fi is connected; syncing continues in the background.
 void timeBegin();
 
+// Call regularly. While the clock is still unset, asks NTP again every 30 s.
+void timeTick();
+
 // True once the clock has been set from the network.
 bool timeIsSet();
 

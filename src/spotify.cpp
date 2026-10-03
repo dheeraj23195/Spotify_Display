@@ -6,6 +6,8 @@
 #include <Preferences.h>
 #include "mbedtls/base64.h"
 #include "secrets.h"
+#include "tls.h"
+#include "timesync.h"
 
 static String accessToken;
 static unsigned long tokenObtainedAt = 0;
@@ -40,16 +42,14 @@ void spotifyBegin() {
     prefs.remove("refresh");
   }
 
-  apiClient.setInsecure();  // TODO: verify certificates (hardening step)
-  apiClient.setHandshakeTimeout(10);  // give up on a stalled connection after 10 s
+  tlsConfigure(apiClient);
   apiHttp.setReuse(true);   // keep the connection open between requests
   apiHttp.setTimeout(5000);
 }
 
 static bool refreshAccessToken() {
   WiFiClientSecure client;
-  client.setInsecure();  // TODO: verify certificates (hardening step)
-  client.setHandshakeTimeout(10);
+  tlsConfigure(client);
   HTTPClient http;
   http.useHTTP10(true);
   if (!http.begin(client, "https://accounts.spotify.com/api/token")) return false;
@@ -84,6 +84,8 @@ static bool refreshAccessToken() {
 }
 
 SpotifyResult spotifyGetNowPlaying(NowPlaying &np) {
+  if (!timeIsSet()) return SpotifyResult::NoClock;  // certificates can't be checked without the date
+
   if (accessToken.isEmpty() || millis() - tokenObtainedAt > tokenLifetimeMs) {
     if (!refreshAccessToken()) return SpotifyResult::AuthError;
   }

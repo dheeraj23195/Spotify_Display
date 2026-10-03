@@ -11,6 +11,13 @@ void timeBegin() {
   configTzTime(TZ_RULE, "pool.ntp.org", "time.google.com", "time.cloudflare.com");
 }
 
+void timeTick() {
+  static unsigned long lastTry = millis();
+  if (timeIsSet() || millis() - lastTry < 30000) return;
+  lastTry = millis();
+  timeBegin();
+}
+
 bool timeIsSet() {
   return time(nullptr) > MIN_VALID;
 }
