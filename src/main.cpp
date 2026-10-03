@@ -9,6 +9,7 @@
 #include "spotify.h"
 #include "settings.h"
 #include "web.h"
+#include "timesync.h"
 #include "driver/gpio.h"
 
 // ---------- Panel wiring (verified) ----------
@@ -273,6 +274,7 @@ void networkTask(void *) {
     vTaskDelay(pdMS_TO_TICKS(10000));
   }
   webBegin();  // settings page + Wi-Fi updates
+  timeBegin();
   showMessage("SPOTIFY");
   spotifyBegin();
 
