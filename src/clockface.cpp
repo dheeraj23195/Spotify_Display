@@ -483,8 +483,47 @@ static void micro(int x, int y, const uint8_t rows[5], const float c[3]) {
       if (rows[row] & (4 >> col)) blend(x + col, y + row, c, 1.0f);
 }
 
-// Time centred on the panel with AM/PM right after it. Returns the x of the AM/PM letters
-// (the temperature sits above them), or -1 if the time is unknown.
+// ---- Temperature: 3x5 digits so "35" and the degree ring fit next to a 2-digit hour ----
+static const uint8_t MICRO_DIGITS[11][5] = {{7, 5, 5, 5, 7}, {2, 6, 2, 2, 7}, {7, 1, 7, 4, 7}, {7, 1, 7, 1, 7},
+                                            {5, 5, 7, 1, 1}, {7, 4, 7, 1, 7}, {7, 4, 7, 5, 7}, {7, 1, 2, 2, 2},
+                                            {7, 5, 7, 5, 7}, {7, 5, 7, 1, 7}, {0, 0, 7, 0, 0}};  // 10 = minus
+
+// Characters to draw for the temperature (digits, 10 = minus); returns how many.
+// *ring says whether the degree ring fits (three characters, e.g. -12, leave no room).
+static int tempChars(int tempC, int digits[3], bool *ring) {
+  int v = tempC, n = 0;
+  if (v < 0) digits[n++] = 10;
+  if (v < 0) v = -v;
+  if (v > 99) v = 99;
+  if (v >= 10) digits[n++] = v / 10;
+  digits[n++] = v % 10;
+  *ring = n < 3;
+  return n;
+}
+
+static int tempWidth(const ClockInfo &info) {
+  if (!info.weatherKnown) return 0;
+  int digits[3];
+  bool ring;
+  int n = tempChars(info.tempC, digits, &ring);
+  return n * 4 - 1 + (ring ? 4 : 0);
+}
+
+// Drawn with its left edge at x, level with the top of the time digits
+static void drawTemp(const ClockInfo &info, int x) {
+  int digits[3];
+  bool ring;
+  int n = tempChars(info.tempC, digits, &ring);
+  for (int i = 0; i < n; i++, x += 4) micro(x, TEMP_Y, MICRO_DIGITS[digits[i]], TEMP_COL);
+  if (ring) {
+    static const uint8_t degree[5] = {2, 5, 2, 0, 0};  // 3x3 ring at the top
+    micro(x, TEMP_Y, degree, TEMP_COL);
+  }
+}
+
+// The time with a column to its right: AM/PM at the bottom, the temperature above it, both
+// starting on the same vertical line. The whole group is centred on the panel, so the time
+// makes way when the column is wide. Returns the x of that line, or -1 if the time is unknown.
 static int drawTime(const ClockInfo &info) {
   int d[4], hourDigits = 2;
   if (info.timeKnown) {
@@ -502,7 +541,8 @@ static int drawTime(const ClockInfo &info) {
 
   // digit 10 wide, 2 gap; colon 2 wide; then "AM"/"PM" 7 wide
   int width = hourDigits * 12 - 2 + 2 + 2 + 2 + 22;
-  if (info.timeKnown) width += 3 + 7;
+  int tw = tempWidth(info), column = tw > 7 ? tw : 7;  // AM/PM is 7 wide
+  if (info.timeKnown) width += 3 + column;
   int x = (W - width) / 2, y = TIME_Y;
 
   int i = 0;
@@ -515,34 +555,10 @@ static int drawTime(const ClockInfo &info) {
   for (int k = 0; k < 2; k++, i++, x += 12) glyph(x, y, d[i], 2, TIME_COL);
 
   if (!info.timeKnown) return -1;
-  x += 1;
+  x += 1;  // 3 clear pixels after the last digit (it already has 2 of its own)
   micro(x, AMPM_Y, info.hour < 12 ? MICRO_A : MICRO_P, AMPM_COL);
   micro(x + 4, AMPM_Y, MICRO_M, AMPM_COL);
   return x;
-}
-
-// ---- Temperature: 3x5 digits so "35" and the degree ring fit the 11-pixel column ----
-static const uint8_t MICRO_DIGITS[11][5] = {{7, 5, 5, 5, 7}, {2, 6, 2, 2, 7}, {7, 1, 7, 4, 7}, {7, 1, 7, 1, 7},
-                                            {5, 5, 7, 1, 1}, {7, 4, 7, 1, 7}, {7, 4, 7, 5, 7}, {7, 1, 2, 2, 2},
-                                            {7, 5, 7, 5, 7}, {7, 5, 7, 1, 7}, {0, 0, 7, 0, 0}};  // 10 = minus
-
-static void drawTemp(const ClockInfo &info, int ampmX) {
-  int v = info.tempC;
-  int digits[3], n = 0;
-  if (v < 0) digits[n++] = 10;
-  if (v < 0) v = -v;
-  if (v > 99) v = 99;
-  if (v >= 10) digits[n++] = v / 10;
-  digits[n++] = v % 10;
-  bool ring = n < 3;  // three characters (e.g. -12) leave no room for the ring
-  int width = n * 4 - 1 + (ring ? 4 : 0);
-  int slotX = ampmX >= 0 ? ampmX - 2 : 53;  // 11 wide, centred over AM/PM
-  int x = slotX + (11 - width) / 2, y = TEMP_Y;
-  for (int i = 0; i < n; i++, x += 4) micro(x, y, MICRO_DIGITS[digits[i]], TEMP_COL);
-  if (ring) {
-    static const uint8_t degree[5] = {2, 5, 2, 0, 0};  // 3x3 ring at the top
-    micro(x, y, degree, TEMP_COL);
-  }
 }
 
 void clockDraw(uint8_t *rgb, const ClockInfo &info, uint32_t ms) {
@@ -551,6 +567,6 @@ void clockDraw(uint8_t *rgb, const ClockInfo &info, uint32_t ms) {
   Pose pose = animate(info, ms);
   drawHead(pose);
   drawFace(pose, ms);
-  int ampmX = drawTime(info);
-  if (info.weatherKnown) drawTemp(info, ampmX);
+  int columnX = drawTime(info);
+  if (info.weatherKnown) drawTemp(info, columnX >= 0 ? columnX : 53);
 }
