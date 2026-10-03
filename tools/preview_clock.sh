@@ -27,6 +27,12 @@ r wm12 --hour 10 --min 5 --temp -12 --seconds 3
 r moods --hour 14 --min 15 --temp 28 --cycle 3 --seconds 30
 for m in 0 1 2 3 4 5 6 7 8 9; do r m$m --hour 14 --min 15 --temp 31 --mood $m --seconds 3; done
 
+# night: the dome is the moon
+r moon      --hour 20 --min 30 --temp 24 --night 1 --seconds 5
+r moonsleep --hour 2  --min 10 --temp 21 --night 1 --mood 6 --seconds 5
+r moonhappy --hour 21 --min 45 --temp 23 --night 1 --mood 1 --seconds 5
+r moonheart --hour 21 --min 45 --temp 23 --night 1 --mood 7 --seconds 5
+
 python3 -m venv "$tmp/venv"
 "$tmp/venv/bin/pip" -q install pillow numpy 2>/dev/null
 OUT="$out" TMP="$tmp" "$tmp/venv/bin/python" "$root/tools/preview_clock.py"

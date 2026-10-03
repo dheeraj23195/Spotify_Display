@@ -12,6 +12,7 @@ struct ClockInfo {
   int hour = 0, minute = 0;  // local time, 24-hour
   bool weatherKnown = false;  // false = no temperature to show
   int tempC = 0;
+  bool night = false;         // after sunset: the dome turns into the moon
 };
 
 // Draws one frame of the idle screen into rgb: 64x64 pixels, RGB888, upright (before

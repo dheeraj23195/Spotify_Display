@@ -20,6 +20,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(k, "--temp")) { info.weatherKnown = true; info.tempC = atoi(v); }  // shows the temperature
     else if (!strcmp(k, "--seconds")) seconds = atof(v);
     else if (!strcmp(k, "--minchange")) minuteChangeAt = atof(v);
+    else if (!strcmp(k, "--night")) info.night = atoi(v) != 0;
     else if (!strcmp(k, "--mood")) clockForceMood(atoi(v));
     else if (!strcmp(k, "--cycle")) cycleEvery = atof(v);  // step through every mood, this many seconds each
     else if (!strcmp(k, "--out")) out = v;

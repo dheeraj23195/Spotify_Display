@@ -514,6 +514,7 @@ static ClockInfo currentClockInfo() {
     ci.timeKnown = true;
     ci.hour = t.tm_hour;
     ci.minute = t.tm_min;
+    ci.night = weatherNight(t.tm_hour, t.tm_min);
   }
   WeatherNow w;
   if (weatherGet(w)) {

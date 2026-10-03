@@ -15,6 +15,7 @@ static portMUX_TYPE lock = portMUX_INITIALIZER_UNLOCKED;  // network task writes
 static WeatherNow latest;
 static bool haveReading = false;
 static uint32_t readingAt = 0;
+static int sunriseMin = -1, sunsetMin = -1;  // minutes after midnight, local; -1 = not known yet
 
 #if defined(WEATHER_LAT) && defined(WEATHER_LON)
 static bool fetch() {
@@ -24,7 +25,7 @@ static bool fetch() {
   http.useHTTP10(true);
   http.setTimeout(5000);
   if (!http.begin(client, "https://api.open-meteo.com/v1/forecast?latitude=" WEATHER_LAT
-                          "&longitude=" WEATHER_LON "&current=temperature_2m")) {
+                          "&longitude=" WEATHER_LON "&current=temperature_2m&daily=sunrise,sunset&timezone=auto&forecast_days=1")) {
     return false;
   }
   int code = http.GET();
@@ -41,10 +42,20 @@ static bool fetch() {
     Serial.println("Weather reply not understood");
     return false;
   }
+  // "2026-10-03T18:04" -> minutes after midnight
+  auto minutesOf = [](const char *iso) {
+    return (iso && strlen(iso) >= 16) ? atoi(iso + 11) * 60 + atoi(iso + 14) : -1;
+  };
+  int rise = minutesOf(doc["daily"]["sunrise"][0] | (const char *)nullptr);
+  int set = minutesOf(doc["daily"]["sunset"][0] | (const char *)nullptr);
   WeatherNow w;
   w.tempC = (int)lroundf(cur["temperature_2m"].as<float>());
   portENTER_CRITICAL(&lock);
   latest = w;
+  if (rise >= 0 && set >= 0) {
+    sunriseMin = rise;
+    sunsetMin = set;
+  }
   haveReading = true;
   readingAt = millis();
   portEXIT_CRITICAL(&lock);
@@ -73,4 +84,15 @@ bool weatherGet(WeatherNow &out) {
   if (ok) out = latest;
   portEXIT_CRITICAL(&lock);
   return ok;
+}
+
+bool weatherNight(int hour, int minute) {
+  int now = hour * 60 + minute, rise = 6 * 60, set = 18 * 60;
+  portENTER_CRITICAL(&lock);
+  if (sunriseMin >= 0 && sunsetMin >= 0) {
+    rise = sunriseMin;
+    set = sunsetMin;
+  }
+  portEXIT_CRITICAL(&lock);
+  return now >= set || now < rise;
 }

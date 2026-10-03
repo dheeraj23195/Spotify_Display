@@ -24,6 +24,9 @@ static const int TIME_Y = 49, TEMP_Y = 49, AMPM_Y = 57;
 
 // Colours (r, g, b)
 static const float YELLOW_LIGHT[3] = {255, 224, 64}, YELLOW_DARK[3] = {250, 176, 10};
+// Night: the dome becomes the moon (cool grey-blue, so the white eyes still stand out)
+static const float MOON_LIGHT[3] = {198, 210, 234}, MOON_DARK[3] = {122, 134, 168};
+static const float CRATER[3] = {70, 82, 118}, CRATER_RIM[3] = {228, 236, 250};
 static const float EYE_WHITE[3] = {255, 242, 247}, INK[3] = {16, 9, 4}, BROW[3] = {10, 5, 2};
 static const float TIME_COL[3] = {246, 238, 222}, AMPM_COL[3] = {205, 165, 85};
 static const float TEMP_COL[3] = {190, 215, 240};
@@ -289,14 +292,18 @@ static Pose animate(const ClockInfo &info, uint32_t ms) {
 //  The face
 // =====================================================================
 
-// Dome colour at a point: light up top-left, deeper amber toward the rim and the base
+static float nightAmt = 0.0f;  // 0 = sun-yellow dome, 1 = moon; eases between the two
+
+// Dome colour at a point: light up top-left, deeper toward the rim and the base
 static void domeColor(float x, float y, float out[3]) {
   float hx = x - 22.0f, hy = y - 17.0f;
   float t = clamp01(sqrtf(hx * hx + hy * hy) / (HEAD_R * 1.5f));
   float shade = 0.74f + 0.26f * clamp01((HEAD_BASE - y) / 6.0f);
   float glow = 0.22f * expf(-(hx * hx + hy * hy) / 72.0f);
   for (int i = 0; i < 3; i++) {
-    float c = mixf(YELLOW_LIGHT[i], YELLOW_DARK[i], t) * shade;
+    float sun = mixf(YELLOW_LIGHT[i], YELLOW_DARK[i], t);
+    float moon = mixf(MOON_LIGHT[i], MOON_DARK[i], t);
+    float c = mixf(sun, moon, nightAmt) * shade;
     out[i] = mixf(c, 255.0f, glow);
   }
 }
@@ -319,6 +326,37 @@ static void drawHead(const Pose &p) {
       domeColor(px, py, c);
       blend(x, y, c, a);
     }
+  }
+}
+
+// Moon craters: darker pits with a light lower rim, kept clear of the eyes and mouth
+static void drawCraters(const Pose &p) {
+  if (nightAmt < 0.02f) return;
+  static const float CR[][3] = {{9, 33, 5.0f}, {54, 22, 3.4f}, {51, 41, 5.4f}, {20, 43, 2.8f},
+                                {31, 12, 3.0f}, {58, 34, 2.2f}, {7, 21, 2.4f}, {43, 11, 2.0f}, {13, 42, 1.8f}};
+  float R = HEAD_R * breatheScale(p);
+  for (const auto &c : CR) {
+    float cx = c[0], cy = c[1], r = c[2];
+    shape(cx - r - 2, cy - r - 2, cx + r + 2, cy + r + 2,
+          [=](float x, float y) {
+            float dome = distCircle(x, y, HEAD_CX, HEAD_CY, R);
+            float cut = y - HEAD_BASE;
+            if (cut > dome) dome = cut;
+            float pit = distCircle(x, y, cx, cy, r);
+            return dome > pit ? dome : pit;
+          },
+          CRATER, 0.7f * nightAmt);
+    shape(cx - r - 2, cy - r - 2, cx + r + 2, cy + r + 2,
+          [=](float x, float y) {
+            float dome = distCircle(x, y, HEAD_CX, HEAD_CY, R);
+            float cut = y - HEAD_BASE;
+            if (cut > dome) dome = cut;
+            float outer = distCircle(x, y, cx, cy, r);
+            float inner = -distCircle(x, y, cx - 0.9f, cy - 0.9f, r);  // outside the shifted pit = the rim
+            float d = outer > inner ? outer : inner;
+            return dome > d ? dome : d;
+          },
+          CRATER_RIM, 0.65f * nightAmt);
   }
 }
 
@@ -565,7 +603,18 @@ void clockDraw(uint8_t *rgb, const ClockInfo &info, uint32_t ms) {
   fb = rgb;
   memset(rgb, 0, W * H * 3);
   Pose pose = animate(info, ms);
+
+  // Sun-yellow by day, moon after sunset; eases over a few seconds (snaps if we were away)
+  static uint32_t lastMs = 0;
+  static bool started = false;
+  float target = info.night ? 1.0f : 0.0f;
+  if (!started || ms - lastMs > 1000) nightAmt = target;
+  else nightAmt += (target - nightAmt) * (1.0f - expf(-(float)(ms - lastMs) * 0.001f / 2.0f));
+  started = true;
+  lastMs = ms;
+
   drawHead(pose);
+  drawCraters(pose);
   drawFace(pose, ms);
   int columnX = drawTime(info);
   if (info.weatherKnown) drawTemp(info, columnX >= 0 ? columnX : 53);

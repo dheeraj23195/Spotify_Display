@@ -33,6 +33,8 @@ items = [("12:45 PM  t=0.5s", day[15]), ("t=2.0s", day[60]), ("t=4.5s (new minut
          ("9:07 AM", frames("morning")[40]), ("2:10 AM (sleepy lids)", frames("night")[100]), ("no time yet", frames("notime")[30])]
 for name, key in [("36 deg, 2:15 PM", "w36"), ("5 deg, 9:07 AM (1-digit hour)", "w5"), ("-2 deg", "wm2"), ("-12 deg (no ring)", "wm12")]:
     items.append((name, frames(key)[60]))
+for name, key in [("moon, 8:30 PM", "moon"), ("moon, asleep", "moonsleep"), ("moon, happy", "moonhappy"), ("moon, heart eyes", "moonheart")]:
+    items.append((name, frames(key)[75]))
 sheet(items, 3).save(os.path.join(out, "sheet.png"))
 
 gif = [dots(f).convert("P", palette=Image.ADAPTIVE, colors=128) for f in day[::2]]
