@@ -13,6 +13,7 @@
 #include "clockface.h"
 #include "tls.h"
 #include "health.h"
+#include "weather.h"
 #include "driver/gpio.h"
 
 // ---------- Panel wiring (verified) ----------
@@ -347,6 +348,7 @@ void networkTask(void *) {
     }
 
     timeTick();
+    weatherTick();
     NowPlaying np;
     SpotifyResult result = spotifyGetNowPlaying(np);
     if (result == SpotifyResult::Ok || result == SpotifyResult::NothingPlaying ||
@@ -512,6 +514,13 @@ static ClockInfo currentClockInfo() {
     ci.timeKnown = true;
     ci.hour = t.tm_hour;
     ci.minute = t.tm_min;
+  }
+  WeatherNow w;
+  if (weatherGet(w)) {
+    ci.weatherKnown = true;
+    ci.weather = w.kind;
+    ci.isDay = w.isDay;
+    ci.tempC = w.tempC;
   }
   return ci;
 }

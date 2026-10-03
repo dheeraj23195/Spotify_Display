@@ -20,7 +20,7 @@ print(f"bundle: {n} certificates, {len(data)} bytes")
 
 import subprocess, re
 failed = False
-for host in ["api.spotify.com", "accounts.spotify.com", "i.scdn.co"]:
+for host in ["api.spotify.com", "accounts.spotify.com", "i.scdn.co", "api.open-meteo.com"]:
     out = subprocess.run(["openssl","s_client","-connect",f"{host}:443","-servername",host,"-showcerts"],
                          input=b"", capture_output=True).stdout.decode()
     pems = re.findall(r"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----", out, re.S)
