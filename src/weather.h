@@ -1,4 +1,6 @@
 #pragma once
+#include <stdint.h>
+
 struct WeatherNow {
   int tempC;
 };
@@ -11,6 +13,17 @@ void weatherTick();
 // Render loop: true between sunset and sunrise at the configured place. Uses today's real
 // sunrise/sunset once fetched, and 18:00-06:00 until then (or if weather is not configured).
 bool weatherNight(int hour, int minute);
+
+// For the status page. lastCode: 200 = fine, negative HTTP client codes (e.g. -1 connection
+// failed, -11 timed out), -100 request not started, -200 reply not understood,
+// -300 weather not configured, 0 = not tried yet.
+struct WeatherStatus {
+  bool everOk;
+  uint32_t okAgoS;  // seconds since the last good reading
+  int lastCode;
+  uint32_t tries, failures;
+};
+WeatherStatus weatherStatus();
 
 // Render loop: the latest reading, or false if there is none yet or it is over an hour old.
 bool weatherGet(WeatherNow &out);

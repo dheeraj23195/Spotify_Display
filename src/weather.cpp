@@ -8,13 +8,15 @@
 #include "timesync.h"
 
 static const uint32_t REFRESH_MS = 15UL * 60 * 1000;  // how often to ask
-static const uint32_t RETRY_MS = 3UL * 60 * 1000;     // after a failed attempt
-static const uint32_t STALE_MS = 60UL * 60 * 1000;    // older than this is not shown
+static const uint32_t RETRY_MS = 60UL * 1000;          // after a failed attempt
+static const uint32_t STALE_MS = 3UL * 60 * 60 * 1000;  // older than this is not shown
 
 static portMUX_TYPE lock = portMUX_INITIALIZER_UNLOCKED;  // network task writes, render loop reads
 static WeatherNow latest;
 static bool haveReading = false;
 static uint32_t readingAt = 0;
+static int lastCode = 0;
+static uint32_t tries = 0, failures = 0;
 static int sunriseMin = -1, sunsetMin = -1;  // minutes after midnight, local; -1 = not known yet
 
 #if defined(WEATHER_LAT) && defined(WEATHER_LON)
@@ -26,11 +28,13 @@ static bool fetch() {
   http.setTimeout(5000);
   if (!http.begin(client, "https://api.open-meteo.com/v1/forecast?latitude=" WEATHER_LAT
                           "&longitude=" WEATHER_LON "&current=temperature_2m&daily=sunrise,sunset&timezone=auto&forecast_days=1")) {
+    lastCode = -100;
     return false;
   }
   int code = http.GET();
   if (code != 200) {
     Serial.printf("Weather failed: HTTP %d\n", code);
+    lastCode = code == 0 ? -1 : code;
     http.end();
     return false;
   }
@@ -40,6 +44,7 @@ static bool fetch() {
   JsonObject cur = doc["current"];
   if (err || cur["temperature_2m"].isNull()) {
     Serial.println("Weather reply not understood");
+    lastCode = -200;
     return false;
   }
   // "2026-10-03T18:04" -> minutes after midnight
@@ -58,6 +63,7 @@ static bool fetch() {
   }
   haveReading = true;
   readingAt = millis();
+  lastCode = 200;
   portEXIT_CRITICAL(&lock);
   return true;
 }
@@ -67,7 +73,10 @@ void weatherTick() {
 #if defined(WEATHER_LAT) && defined(WEATHER_LON)
   static uint32_t nextTry = 0;
   if (!timeIsSet() || (int32_t)(millis() - nextTry) < 0) return;  // certificates need the date
-  nextTry = millis() + (fetch() ? REFRESH_MS : RETRY_MS);
+  bool ok = fetch();
+  tries++;
+  if (!ok) failures++;
+  nextTry = millis() + (ok ? REFRESH_MS : RETRY_MS);
 #else
   static bool said = false;
   if (!said) {
@@ -95,4 +104,19 @@ bool weatherNight(int hour, int minute) {
   }
   portEXIT_CRITICAL(&lock);
   return now >= set || now < rise;
+}
+
+WeatherStatus weatherStatus() {
+  WeatherStatus s;
+  portENTER_CRITICAL(&lock);
+  s.everOk = haveReading;
+  s.okAgoS = haveReading ? (millis() - readingAt) / 1000 : 0;
+  s.lastCode = lastCode;
+  s.tries = tries;
+  s.failures = failures;
+  portEXIT_CRITICAL(&lock);
+#if !(defined(WEATHER_LAT) && defined(WEATHER_LON))
+  s.lastCode = -300;
+#endif
+  return s;
 }

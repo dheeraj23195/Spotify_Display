@@ -10,6 +10,7 @@
 #include "spotify.h"
 #include "icon.h"
 #include "perf.h"
+#include "weather.h"
 
 extern volatile bool otaActive;   // defined in main.cpp
 extern volatile int otaProgress;
@@ -252,17 +253,22 @@ static String settingsPage() {
 
   {
     PerfSnapshot p = perfGet();
-    char buf[520];
+    WeatherStatus ws = weatherStatus();
+    char wAgo[40];
+    if (ws.everOk) snprintf(wAgo, sizeof(wAgo), "last good %u min ago", ws.okAgoS / 60);
+    else snprintf(wAgo, sizeof(wAgo), "no reading yet");
+    char buf[640];
     snprintf(buf, sizeof(buf),
              "<h2>Performance</h2><p class='status'>"
              "Frame build: %u us avg, %u us max (33333 us per frame = %u%% busy)<br>"
              "Waiting for panel: %u us<br>"
              "Free memory: %u KB (lowest %u KB, largest block %u KB)<br>"
              "Free PSRAM: %u KB<br>"
-             "Stack left: network %u B, web %u B</p>",
+             "Stack left: network %u B, web %u B<br>"
+             "Weather: %s, %u tries, %u failed, last result %d</p>",
              p.composeAvgUs, p.composeMaxUs, p.composeAvgUs * 100 / 33333, p.flipAvgUs,
              p.freeHeap / 1024, p.minFreeHeap / 1024, p.largestBlock / 1024, p.freePsram / 1024,
-             p.netStackFree, p.webStackFree);
+             p.netStackFree, p.webStackFree, wAgo, ws.tries, ws.failures, ws.lastCode);
     h += buf;
   }
 
