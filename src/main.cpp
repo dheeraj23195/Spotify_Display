@@ -39,7 +39,7 @@ const int ART = 128;  // working resolution for effects (2x the panel)
 struct Art {
   uint8_t *px = nullptr;  // ART x ART, RGB888
   bool animate = false;   // true = album art (effects), false = text/static
-  bool instant = false;   // true = swap in without a crossfade (clock minute change)
+  bool clock = false;     // true = no pixels: the render loop draws the live clock face
 };
 
 MatrixPanel_I2S_DMA *display = nullptr;
@@ -94,7 +94,7 @@ void publishArt() {
 static bool clockShown = false;
 
 // Upscale the 64x64 canvas into the next art slot and hand it to the render loop
-static void publishCanvas(bool instant) {
+static void publishCanvas() {
   Art *a = beginArt();
   uint16_t *src = canvas.getBuffer();
   for (int y = 0; y < ART; y++) {
@@ -107,7 +107,7 @@ static void publishCanvas(bool instant) {
     }
   }
   a->animate = false;
-  a->instant = instant;
+  a->clock = false;
   publishArt();
 }
 
@@ -117,22 +117,19 @@ void showMessage(const char *msg) {
   canvas.setTextColor(0xFFFF);
   canvas.setCursor(2, 2);
   canvas.print(msg);
-  publishCanvas(false);
+  publishCanvas();
   clockShown = false;
 }
 
-// Idle picture: the clock. Redraws when the minute changes (or the time gets set).
+// Idle picture: the clock face. It is drawn live by the render loop (it animates),
+// so all the network task does is switch to it.
 void showClock() {
-  static int shownKey = 0;
-  struct tm t;
-  bool valid = timeNow(t);
-  int key = valid ? 1 + t.tm_yday * 1440 + t.tm_hour * 60 + t.tm_min : 0;
-  if (clockShown && key == shownKey) return;
-
-  clockDraw(canvas, valid ? &t : nullptr);
-  publishCanvas(clockShown);  // minute changes swap in without a crossfade
+  if (clockShown) return;
+  Art *a = beginArt();
+  a->animate = false;
+  a->clock = true;
+  publishArt();
   clockShown = true;
-  shownKey = key;
 }
 
 bool connectWiFi() {
@@ -285,7 +282,7 @@ bool loadCover(const char *url) {
   Art *a = beginArt();
   downscaleToArt(a->px);
   a->animate = true;
-  a->instant = false;
+  a->clock = false;
   publishArt();
   return true;
 }
@@ -507,6 +504,18 @@ void renderView(const Art *a, float theta, float zoom, float shrink, float gain,
   }
 }
 
+// What the clock face needs to know right now
+static ClockInfo currentClockInfo() {
+  ClockInfo ci;
+  struct tm t;
+  if (timeNow(t)) {
+    ci.timeKnown = true;
+    ci.hour = t.tm_hour;
+    ci.minute = t.tm_min;
+  }
+  return ci;
+}
+
 // Type a number (0-255) in the Serial Monitor and press Enter to change brightness
 void handleSerial() {
   static String input;
@@ -635,15 +644,16 @@ void loop() {
   xSemaphoreGive(artMutex);
 
   if (newArt) {
-    if (!current->instant) {
-      if (lastShown) memcpy(fadeFrom, lastShown, NPIX * 3);
-      fading = true;
-      fadeStart = now;
-    }
+    if (lastShown) memcpy(fadeFrom, lastShown, NPIX * 3);
+    fading = true;
+    fadeStart = now;
     animTime = 0;  // each new cover starts facing the camera
   }
 
-  if (current->animate) {
+  if (current->clock) {
+    pauseAmt = 0;
+    clockDraw(outFrame, currentClockInfo(), now);
+  } else if (current->animate) {
     // Ease smoothly between the playing and paused looks
     bool paused = !isPlaying;
     float step = dt * 1000.0f / PAUSE_ANIM_MS;
