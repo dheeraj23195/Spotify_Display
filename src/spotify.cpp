@@ -83,7 +83,6 @@ static bool refreshAccessToken() {
     prefs.putString("refresh", refreshToken);
     Serial.println("Spotify issued a new refresh token; saved it");
   }
-  Serial.println("Spotify access token refreshed");
   return accessToken.length() > 0;
 }
 
@@ -111,8 +110,6 @@ SpotifyResult spotifyGetNowPlaying(NowPlaying &np) {
   spotifyStats.totalMs += took;
   if (took > spotifyStats.worstMs) spotifyStats.worstMs = took;
   if (code < 0) spotifyStats.failures++;
-  Serial.printf("Spotify poll: HTTP %d in %lu ms (signal %d dBm)\n",
-                code, millis() - t0, WiFi.RSSI());
 
   if (code < 0) { apiClient.stop(); return SpotifyResult::NetworkError; }  // start fresh next time
   if (code == 204) { np.active = false; return SpotifyResult::NothingPlaying; }

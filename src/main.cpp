@@ -139,19 +139,14 @@ bool connectWiFi() {
   WiFi.setSleep(false);  // keep the radio awake: faster, more reliable replies
   WiFi.setAutoReconnect(true);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.print("Connecting to Wi-Fi");
   for (int i = 0; i < 40 && WiFi.status() != WL_CONNECTED; i++) {
     vTaskDelay(pdMS_TO_TICKS(500));
-    Serial.print(".");
   }
-  Serial.println();
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.print("Connected, IP: ");
-    Serial.println(WiFi.localIP());
-    Serial.printf("Signal strength: %d dBm\n", WiFi.RSSI());
+    Serial.printf("Wi-Fi connected, IP %s\n", WiFi.localIP().toString().c_str());
     return true;
   }
-  Serial.println("Wi-Fi FAILED");
+  Serial.println("Wi-Fi failed, retrying");
   return false;
 }
 
@@ -170,7 +165,6 @@ uint8_t *downloadFile(const char *url, size_t &outLen) {
   }
 
   if (!timeIsSet()) return nullptr;  // certificates can't be checked without the date
-  unsigned long t0 = millis();
   if (!http.begin(client, url)) {
     Serial.println("HTTP begin failed");
     client.stop();
@@ -217,7 +211,6 @@ uint8_t *downloadFile(const char *url, size_t &outLen) {
     client.stop();
     return nullptr;
   }
-  Serial.printf("Cover download: %u bytes in %lu ms\n", got, millis() - t0);
   outLen = got;
   return buf;
 }
@@ -278,7 +271,6 @@ bool loadCover(const char *url) {
     if (srcW > MAX_SRC || srcH > MAX_SRC || srcW == 0 || srcH == 0) {
       Serial.printf("Image too large: %dx%d\n", w, h);
     } else {
-      Serial.printf("Image %dx%d (decoded %dx%d), %u bytes\n", w, h, srcW, srcH, len);
       ok = jpeg.decode(0, 0, scale);
     }
     jpeg.close();
@@ -367,7 +359,6 @@ void networkTask(void *) {
       case SpotifyResult::Ok:
         isPlaying = np.isPlaying;
         if (np.trackId != shownTrackId) {
-          Serial.printf("Now playing: %s - %s\n", np.title.c_str(), np.artist.c_str());
           if (np.artUrl.isEmpty()) {
             showMessage("NO ART");
             shownTrackId = np.trackId;

@@ -407,7 +407,6 @@ static void handleUpdateUpload() {
     uploadAuthorized = isLoggedIn();
     if (!uploadAuthorized) return;
     uploadActive = true;
-    Serial.printf("Firmware upload started: %s\n", up.filename.c_str());
     if (!Update.begin(UPDATE_SIZE_UNKNOWN)) Update.printError(Serial);
   } else if (up.status == UPLOAD_FILE_WRITE) {
     if (!uploadAuthorized) return;
@@ -482,7 +481,6 @@ void webBegin() {
   ArduinoOTA.onStart([]() {
     otaProgress = 0;
     otaActive = true;
-    Serial.println("Wi-Fi update started");
   });
   ArduinoOTA.onProgress([](unsigned int done, unsigned int total) {
     otaProgress = done * 100 / total;
