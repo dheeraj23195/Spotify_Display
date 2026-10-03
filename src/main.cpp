@@ -10,6 +10,7 @@
 #include "settings.h"
 #include "web.h"
 #include "timesync.h"
+#include "clockface.h"
 #include "driver/gpio.h"
 
 // ---------- Panel wiring (verified) ----------
@@ -35,6 +36,7 @@ const int ART = 128;  // working resolution for effects (2x the panel)
 struct Art {
   uint8_t *px = nullptr;  // ART x ART, RGB888
   bool animate = false;   // true = album art (effects), false = text/static
+  bool instant = false;   // true = swap in without a crossfade (clock minute change)
 };
 
 MatrixPanel_I2S_DMA *display = nullptr;
@@ -85,12 +87,11 @@ void publishArt() {
 //  Network side (core 0)
 // =====================================================================
 
-void showMessage(const char *msg) {
-  canvas.fillScreen(0);
-  canvas.setTextColor(0xFFFF);
-  canvas.setCursor(2, 2);
-  canvas.print(msg);
+// Whether the picture currently shown is the clock (network task only)
+static bool clockShown = false;
 
+// Upscale the 64x64 canvas into the next art slot and hand it to the render loop
+static void publishCanvas(bool instant) {
   Art *a = beginArt();
   uint16_t *src = canvas.getBuffer();
   for (int y = 0; y < ART; y++) {
@@ -103,7 +104,32 @@ void showMessage(const char *msg) {
     }
   }
   a->animate = false;
+  a->instant = instant;
   publishArt();
+}
+
+void showMessage(const char *msg) {
+  canvas.fillScreen(0);
+  canvas.setTextSize(1);
+  canvas.setTextColor(0xFFFF);
+  canvas.setCursor(2, 2);
+  canvas.print(msg);
+  publishCanvas(false);
+  clockShown = false;
+}
+
+// Idle picture: the clock. Redraws when the minute changes (or the time gets set).
+void showClock() {
+  static int shownKey = 0;
+  struct tm t;
+  bool valid = timeNow(t);
+  int key = valid ? 1 + t.tm_yday * 1440 + t.tm_hour * 60 + t.tm_min : 0;
+  if (clockShown && key == shownKey) return;
+
+  clockDraw(canvas, valid ? &t : nullptr);
+  publishCanvas(clockShown);  // minute changes swap in without a crossfade
+  clockShown = true;
+  shownKey = key;
 }
 
 bool connectWiFi() {
@@ -263,6 +289,7 @@ bool loadCover(const char *url) {
   Art *a = beginArt();
   downscaleToArt(a->px);
   a->animate = true;
+  a->instant = false;
   publishArt();
   return true;
 }
@@ -303,15 +330,13 @@ void networkTask(void *) {
             shownTrackId = np.trackId;
           } else if (loadCover(np.artUrl.c_str())) {
             shownTrackId = np.trackId;
+            clockShown = false;
           }  // if the download failed, we retry on the next poll
         }
         break;
       case SpotifyResult::NothingPlaying:
         isPlaying = false;
-        if (shownTrackId != "idle") {
-          showMessage("NO MUSIC");
-          shownTrackId = "idle";
-        }
+        shownTrackId = "idle";
         break;
       case SpotifyResult::RateLimited:
         Serial.println("Rate limited by Spotify, waiting 30 s");
@@ -323,6 +348,7 @@ void networkTask(void *) {
       default:
         break;  // network hiccup: keep the current picture
     }
+    if (shownTrackId == "idle") showClock();  // keeps ticking even if Spotify is unreachable
     vTaskDelay(pdMS_TO_TICKS(POLL_MS));
   }
 }
@@ -546,9 +572,11 @@ void loop() {
   xSemaphoreGive(artMutex);
 
   if (newArt) {
-    if (lastShown) memcpy(fadeFrom, lastShown, NPIX * 3);
-    fading = true;
-    fadeStart = now;
+    if (!current->instant) {
+      if (lastShown) memcpy(fadeFrom, lastShown, NPIX * 3);
+      fading = true;
+      fadeStart = now;
+    }
     animTime = 0;  // each new cover starts facing the camera
   }
 
