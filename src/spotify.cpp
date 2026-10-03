@@ -47,6 +47,10 @@ void spotifyBegin() {
   apiHttp.setTimeout(5000);
 }
 
+void spotifyResetConnection() {
+  apiClient.stop();
+}
+
 static bool refreshAccessToken() {
   WiFiClientSecure client;
   tlsConfigure(client);

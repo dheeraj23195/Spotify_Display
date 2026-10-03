@@ -15,6 +15,7 @@ struct NowPlaying {
 enum class SpotifyResult { Ok, NothingPlaying, AuthError, RateLimited, NetworkError, NoClock };
 
 void spotifyBegin();
+void spotifyResetConnection();  // drop the kept-open HTTPS connection; the next poll reconnects
 SpotifyResult spotifyGetNowPlaying(NowPlaying &np);
 struct SpotifyStats {
   uint32_t polls = 0;     // requests made since start-up

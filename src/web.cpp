@@ -24,6 +24,7 @@ static Preferences sessPrefs;
 static String sessions[MAX_SESSIONS];    // saved so logins survive restarts
 static int nextSlot = 0;
 static bool uploadAuthorized = false;
+static volatile bool uploadActive = false;
 static String apiToken;                  // for Shortcuts and other scripts
 
 // =====================================================================
@@ -405,12 +406,14 @@ static void handleUpdateUpload() {
   if (up.status == UPLOAD_FILE_START) {
     uploadAuthorized = isLoggedIn();
     if (!uploadAuthorized) return;
+    uploadActive = true;
     Serial.printf("Firmware upload started: %s\n", up.filename.c_str());
     if (!Update.begin(UPDATE_SIZE_UNKNOWN)) Update.printError(Serial);
   } else if (up.status == UPLOAD_FILE_WRITE) {
     if (!uploadAuthorized) return;
     if (Update.write(up.buf, up.currentSize) != up.currentSize) Update.printError(Serial);
   } else if (up.status == UPLOAD_FILE_END) {
+    uploadActive = false;
     if (!uploadAuthorized) return;
     if (Update.end(true)) {
       Serial.printf("Firmware upload finished: %u bytes\n", up.totalSize);
@@ -418,6 +421,7 @@ static void handleUpdateUpload() {
       Update.printError(Serial);
     }
   } else if (up.status == UPLOAD_FILE_ABORTED) {
+    uploadActive = false;
     if (uploadAuthorized) Update.abort();
   }
 }
@@ -465,6 +469,8 @@ static void webTask(void *) {
     vTaskDelay(2);
   }
 }
+
+bool webUploadActive() { return uploadActive; }
 
 void webBegin() {
   loadSessions();

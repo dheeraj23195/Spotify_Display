@@ -12,6 +12,7 @@
 #include "timesync.h"
 #include "clockface.h"
 #include "tls.h"
+#include "health.h"
 #include "driver/gpio.h"
 
 // ---------- Panel wiring (verified) ----------
@@ -136,6 +137,7 @@ void showClock() {
 bool connectWiFi() {
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);  // keep the radio awake: faster, more reliable replies
+  WiFi.setAutoReconnect(true);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   Serial.print("Connecting to Wi-Fi");
   for (int i = 0; i < 40 && WiFi.status() != WL_CONNECTED; i++) {
@@ -295,6 +297,40 @@ bool loadCover(const char *url) {
   return true;
 }
 
+// Start joining the network again from scratch
+static void rejoinWiFi() {
+  WiFi.disconnect();
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+}
+
+// Checked every loop. When the link drops the Wi-Fi stack retries by itself; if that
+// has not worked after 30 s we rejoin from scratch (every 30 s). The "NO WIFI" message
+// only appears after 10 s so a short blip leaves the picture alone.
+static bool wifiUp(String &shownTrackId) {
+  static unsigned long downSince = 0, lastRejoin = 0;
+  static bool messageShown = false;
+  if (WiFi.status() == WL_CONNECTED) {
+    downSince = 0;
+    messageShown = false;
+    return true;
+  }
+  unsigned long now = millis();
+  if (!downSince) {
+    downSince = lastRejoin = now;
+    WiFi.reconnect();
+  }
+  if (!messageShown && now - downSince > 10000) {
+    showMessage("NO WIFI");
+    shownTrackId = "";  // load the picture again once we are back
+    messageShown = true;
+  }
+  if (now - lastRejoin > 30000) {
+    lastRejoin = now;
+    rejoinWiFi();
+  }
+  return false;
+}
+
 void networkTask(void *) {
   showMessage("WIFI...");
   while (!connectWiFi()) {
@@ -307,22 +343,27 @@ void networkTask(void *) {
   spotifyBegin();
 
   String shownTrackId;
+  int failsInARow = 0;
+  unsigned long lastWiFiKick = 0;
   for (;;) {
     if (otaActive) {  // stay quiet while new code is being installed
       vTaskDelay(pdMS_TO_TICKS(500));
       continue;
     }
-    if (WiFi.status() != WL_CONNECTED) {
-      showMessage("NO WIFI");
-      shownTrackId = "";
-      WiFi.reconnect();
-      vTaskDelay(pdMS_TO_TICKS(5000));
+    if (!wifiUp(shownTrackId)) {
+      vTaskDelay(pdMS_TO_TICKS(1000));
       continue;
     }
 
     timeTick();
     NowPlaying np;
-    switch (spotifyGetNowPlaying(np)) {
+    SpotifyResult result = spotifyGetNowPlaying(np);
+    if (result == SpotifyResult::Ok || result == SpotifyResult::NothingPlaying ||
+        result == SpotifyResult::RateLimited) {  // Spotify answered, so the link works
+      healthPollOk();
+      failsInARow = 0;
+    }
+    switch (result) {
       case SpotifyResult::Ok:
         isPlaying = np.isPlaying;
         if (np.trackId != shownTrackId) {
@@ -355,6 +396,15 @@ void networkTask(void *) {
         break;
       default:
         break;  // network hiccup: keep the current picture
+    }
+    // Stuck connection: start a fresh HTTPS connection after 3 failures in a row,
+    // and if Spotify stays out of reach for 90 s, rejoin the Wi-Fi (at most every 2 min)
+    if (result == SpotifyResult::NetworkError || result == SpotifyResult::AuthError) {
+      if (++failsInARow == 3) spotifyResetConnection();
+      if (healthSinceOkMs() > 90000 && millis() - lastWiFiKick > 120000) {
+        lastWiFiKick = millis();
+        rejoinWiFi();
+      }
     }
     if (shownTrackId == "idle") showClock();  // keeps ticking even if Spotify is unreachable
     vTaskDelay(pdMS_TO_TICKS(POLL_MS));
@@ -479,6 +529,7 @@ void setup() {
   Serial.begin(115200);
   delay(1000);
   settingsLoad();
+  healthBegin();
 
   if(DISPLAY_ENABLED) {
     HUB75_I2S_CFG cfg(W, H, 1, pins);
@@ -533,6 +584,7 @@ void loop() {
   }
 
   handleSerial();
+  healthCheck(otaActive || webUploadActive());
   unsigned long now = millis();
   if (lastFrame != 0 && now - lastFrame < 1000UL / FPS) {
     delay(1);
