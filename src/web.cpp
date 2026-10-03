@@ -332,7 +332,7 @@ static void handleRestart() {
 
 // =====================================================================
 //  Token API for Shortcuts (GET or POST, no login cookie needed)
-//    /api/on  /api/off  /api/toggle  /api/status  /api/brightness?percent=40
+//    /api/on  /api/off  /api/toggle  /api/status  /api/brightness?value=120 (or ?percent=40)
 //  The token goes in ?token=... or in an "Authorization: Bearer ..." header.
 // =====================================================================
 
@@ -376,13 +376,17 @@ static void handleApiStatus() { if (requireToken()) sendApiStatus(); }
 
 static void handleApiBrightness() {
   if (!requireToken()) return;
-  String v = server.arg("percent");
-  if (v.isEmpty() || !isDigit(v[0])) {
-    server.send(400, "text/plain", "Use ?percent=0-100");
+  // ?value=5-255 (same scale as the slider on the settings page) or ?percent=0-100
+  String v = server.arg("value"), pct = server.arg("percent");
+  if (!v.isEmpty() && isDigit(v[0])) {
+    settings.brightness = constrain(v.toInt(), 5, 255);
+  } else if (!pct.isEmpty() && isDigit(pct[0])) {
+    float p = constrain(pct.toFloat(), 0.0f, 100.0f);
+    settings.brightness = constrain((int)(p * 2.55f + 0.5f), 5, 255);  // same floor as the slider
+  } else {
+    server.send(400, "text/plain", "Use ?value=5-255 or ?percent=0-100");
     return;
   }
-  float pct = constrain(v.toFloat(), 0.0f, 100.0f);
-  settings.brightness = constrain((int)(pct * 2.55f + 0.5f), 5, 255);  // same floor as the slider
   settingsSave();
   sendApiStatus();
 }
